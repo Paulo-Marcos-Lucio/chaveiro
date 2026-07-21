@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import sys
 import time
 from enum import Enum
 from pathlib import Path
@@ -194,5 +196,15 @@ def rules() -> None:
     Console().print(table)
 
 
+def _force_utf8() -> None:
+    """Evita UnicodeEncodeError no console legado do Windows (cp1252)."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            with contextlib.suppress(ValueError, OSError):
+                reconfigure(encoding="utf-8", errors="replace")
+
+
 def main() -> None:
+    _force_utf8()
     app()
