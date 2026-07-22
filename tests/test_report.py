@@ -4,13 +4,13 @@ import io
 import json
 
 from rich.console import Console
-from tests.conftest import raw_token
 
 from chaveiro.checks.detectors import run_all
 from chaveiro.core.jwt import decode
 from chaveiro.core.models import AuditResult
 from chaveiro.report.console import render
 from chaveiro.report.json_report import to_json
+from tests.conftest import raw_token
 
 NOW = 1_800_000_000
 

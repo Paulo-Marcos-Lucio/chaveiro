@@ -55,6 +55,10 @@ ignore = ["E501"]
 [tool.ruff.lint.per-file-ignores]
 "src/chaveiro/cli.py" = ["B008"]
 
+[tool.ruff.lint.isort]
+# Deixa a categorização determinística entre ambientes (local e CI).
+known-first-party = ["chaveiro", "tests"]
+
 [tool.mypy]
 python_version = "3.10"
 strict = true

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-from tests.conftest import hs_token
 
 from chaveiro.core.jwt import (
     JWTError,
@@ -11,6 +10,7 @@ from chaveiro.core.jwt import (
     encode_hmac,
     verify_hmac,
 )
+from tests.conftest import hs_token
 
 
 def test_b64url_roundtrip() -> None:

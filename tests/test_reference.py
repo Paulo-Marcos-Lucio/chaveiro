@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import pytest
-from tests.conftest import hs_token, raw_token, sign_rs256
 
 from chaveiro.reference.secure_validation import InvalidToken, validate
+from tests.conftest import hs_token, raw_token, sign_rs256
 
 NOW = 1_800_000_000
 SECRET = b"a-strong-random-secret-value-01"

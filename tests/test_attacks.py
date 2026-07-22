@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from tests.conftest import hs_token, sign_rs256
-
 from chaveiro.attacks.confusion import forge_rs_to_hs
 from chaveiro.attacks.crack import crack, crack_with_defaults
 from chaveiro.core.jwt import decode, verify_hmac
+from tests.conftest import hs_token, sign_rs256
 
 
 def test_crack_finds_weak_default_secret() -> None:

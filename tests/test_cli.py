@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tests.conftest import hs_token, raw_token, sign_rs256
 from typer.testing import CliRunner
 
 from chaveiro import __version__
 from chaveiro.cli import app
+from tests.conftest import hs_token, raw_token, sign_rs256
 
 runner = CliRunner()
 NOW = 1_800_000_000
