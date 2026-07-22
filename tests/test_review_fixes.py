@@ -68,3 +68,40 @@ def test_console_render_handles_out_of_range_date() -> None:
     console = Console(file=io.StringIO(), width=200)
     render(result, console)  # não deve levantar
     assert console.file.getvalue()  # type: ignore[attr-defined]
+
+
+# =========================================================================== #
+# Bateria de campo (2026-07-22) — auditoria adversarial multidimensional.
+# =========================================================================== #
+
+from typer.testing import CliRunner  # noqa: E402
+
+from chaveiro.attacks.crack import crack_with_defaults  # noqa: E402
+from chaveiro.cli import app  # noqa: E402
+from chaveiro.core.jwt import encode_hmac  # noqa: E402
+
+_runner = CliRunner()
+
+
+def _none_token() -> str:
+    h = b64url_encode(json.dumps({"alg": "none"}).encode("utf-8"))
+    p = b64url_encode(json.dumps({"sub": "x"}).encode("utf-8"))
+    return f"{h}.{p}."
+
+
+# C1 — segredo HMAC VAZIO (env var não setada) é a falha mais grave e passava batida.
+def test_empty_hmac_secret_is_cracked() -> None:
+    token = encode_hmac({"alg": "HS256", "typ": "JWT"}, {"sub": "admin"}, b"")
+    assert crack_with_defaults(decode(token)) == ""
+
+
+def test_crack_cli_reports_empty_secret() -> None:
+    token = encode_hmac({"alg": "HS256", "typ": "JWT"}, {"sub": "admin"}, b"")
+    result = _runner.invoke(app, ["crack", token])
+    assert result.exit_code == 1  # segredo fraco encontrado
+
+
+# C2 — crack em token não-HS* dava a MESMA mensagem 'nenhum candidato' + exit 0 (enganoso).
+def test_crack_non_hmac_exits_2_not_misleading_0() -> None:
+    result = _runner.invoke(app, ["crack", _none_token()])
+    assert result.exit_code == 2  # 'não se aplica', não o exit 0 de 'segredo forte'

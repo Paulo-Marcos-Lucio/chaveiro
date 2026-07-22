@@ -122,6 +122,13 @@ def crack(
 ) -> None:
     """Testa se o segredo HMAC é fraco (ataque de dicionário)."""
     decoded = _decode_or_die(token)
+    if decoded.alg not in {"HS256", "HS384", "HS512"}:
+        err.print(
+            f"[yellow]O token usa alg={decoded.alg!r}, não HMAC.[/] O crack por dicionário só se "
+            "aplica a HS256/384/512. Para RS*/ES*/none use 'inspect' ou 'forge-confusion' — "
+            "[bold]isto NÃO é evidência de segredo forte[/]."
+        )
+        raise typer.Exit(2)
     extra: list[str] = []
     if wordlist is not None:
         extra = [

@@ -13,7 +13,14 @@ from chaveiro.core.jwt import verify_hmac
 from chaveiro.core.models import DecodedToken
 
 # Segredos fracos vistos em tutoriais, exemplos e libs — o primeiro lugar a olhar.
+# "" vem primeiro: env var de segredo não setada assina com chave VAZIA — a falha mais
+# grave e comum, e a que passava batida (o token mais forjável possível).
 DEFAULT_WEAK_SECRETS: tuple[str, ...] = (
+    "",
+    " ",
+    "null",
+    "none",
+    "undefined",
     "secret",
     "secret123",
     "password",
