@@ -62,8 +62,11 @@ def _claims_with_readable_times(result: AuditResult) -> str:
     for claim in _TIME_CLAIMS:
         value = payload.get(claim)
         if isinstance(value, (int, float)) and not isinstance(value, bool):
-            when = dt.datetime.fromtimestamp(int(value), tz=dt.timezone.utc)
-            notes.append(f"{claim} = {when.isoformat()}")
+            try:
+                when = dt.datetime.fromtimestamp(int(value), tz=dt.timezone.utc)
+                notes.append(f"{claim} = {when.isoformat()}")
+            except (OSError, OverflowError, ValueError):
+                notes.append(f"{claim} = {value} (fora do intervalo de datas)")
     body = json.dumps(payload, indent=2, ensure_ascii=False)
     if notes:
         body += "\n\n" + "\n".join(notes)

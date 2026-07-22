@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
@@ -149,6 +150,8 @@ def check_payload(token: DecodedToken) -> list[Finding]:
 def _as_epoch(value: Any) -> int | None:
     if isinstance(value, bool):
         return None
+    if isinstance(value, float) and not math.isfinite(value):
+        return None  # Infinity/NaN (json.loads aceita esses literais)
     if isinstance(value, (int, float)):
         return int(value)
     return None

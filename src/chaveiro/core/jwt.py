@@ -17,6 +17,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
+from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
 from chaveiro.core.models import DecodedToken
@@ -87,8 +88,8 @@ def decode(token: str) -> DecodedToken:
 def _decode_json(segment: str, what: str) -> dict[str, Any]:
     try:
         data = json.loads(b64url_decode(segment))
-    except json.JSONDecodeError as exc:
-        raise JWTError(f"{what} não é JSON válido") from exc
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise JWTError(f"{what} não é JSON UTF-8 válido") from exc
     if not isinstance(data, dict):
         raise JWTError(f"{what} deve ser um objeto JSON")
     return data
@@ -137,7 +138,17 @@ def verify_asymmetric(token: DecodedToken, public_key_pem: bytes) -> bool:
             )
             return True
         if token.alg in _EC_HASH and isinstance(key, ec.EllipticCurvePublicKey):
-            key.verify(token.signature, token.signing_input, ec.ECDSA(_EC_HASH[token.alg]))
+            # JWS usa assinatura ECDSA crua (R||S); cryptography exige DER.
+            n = (key.curve.key_size + 7) // 8
+            if len(token.signature) != 2 * n:
+                return False
+            r = int.from_bytes(token.signature[:n], "big")
+            s = int.from_bytes(token.signature[n:], "big")
+            key.verify(
+                encode_dss_signature(r, s),
+                token.signing_input,
+                ec.ECDSA(_EC_HASH[token.alg]),
+            )
             return True
     except InvalidSignature:
         return False
