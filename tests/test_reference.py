@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from chaveiro.reference.secure_validation import InvalidToken, validate
-from tests.conftest import hs_token, raw_token, sign_rs256
+from tests.conftest import hs_token, raw_token, sign_eddsa, sign_ps256, sign_rs256
 
 NOW = 1_800_000_000
 SECRET = b"a-strong-random-secret-value-01"
@@ -69,3 +69,57 @@ def test_rs256_confusion_is_rejected_by_reference(rsa_keys: tuple[bytes, bytes])
     forged = forge_rs_to_hs(original, public_pem, edits={"sub": "admin"})
     with pytest.raises(InvalidToken):
         validate(forged, key=public_pem, algorithms=["RS256"], now=NOW)
+
+
+def test_accepts_valid_ps256(rsa_keys: tuple[bytes, bytes]) -> None:
+    private_pem, public_pem = rsa_keys
+    token = sign_ps256({"sub": "ps", "exp": NOW + 60, "iat": NOW}, private_pem)
+    payload = validate(token, key=public_pem, algorithms=["PS256"], now=NOW)
+    assert payload["sub"] == "ps"
+
+
+def test_rejects_tampered_ps256(rsa_keys: tuple[bytes, bytes]) -> None:
+    private_pem, public_pem = rsa_keys
+    token = sign_ps256({"sub": "ps", "exp": NOW + 60, "iat": NOW}, private_pem)
+    tampered = token[:-3] + ("aaa" if not token.endswith("aaa") else "bbb")
+    with pytest.raises(InvalidToken):
+        validate(tampered, key=public_pem, algorithms=["PS256"], now=NOW)
+
+
+def test_accepts_valid_eddsa(ed25519_keys: tuple[bytes, bytes]) -> None:
+    private_pem, public_pem = ed25519_keys
+    token = sign_eddsa({"sub": "ed", "exp": NOW + 60, "iat": NOW}, private_pem)
+    payload = validate(token, key=public_pem, algorithms=["EdDSA"], now=NOW)
+    assert payload["sub"] == "ed"
+
+
+def test_rejects_tampered_eddsa(ed25519_keys: tuple[bytes, bytes]) -> None:
+    private_pem, public_pem = ed25519_keys
+    token = sign_eddsa({"sub": "ed", "exp": NOW + 60, "iat": NOW}, private_pem)
+    tampered = token[:-3] + ("aaa" if not token.endswith("aaa") else "bbb")
+    with pytest.raises(InvalidToken):
+        validate(tampered, key=public_pem, algorithms=["EdDSA"], now=NOW)
+
+
+def test_eddsa_rejected_by_wrong_public_key(ed25519_keys: tuple[bytes, bytes]) -> None:
+    # assinatura Ed25519 válida, mas verificada com outra chave pública -> rejeita
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    private_pem, _ = ed25519_keys
+    other_pub = (
+        ed25519.Ed25519PrivateKey.generate()
+        .public_key()
+        .public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+    )
+    token = sign_eddsa({"sub": "ed", "exp": NOW + 60, "iat": NOW}, private_pem)
+    with pytest.raises(InvalidToken):
+        validate(token, key=other_pub, algorithms=["EdDSA"], now=NOW)
+
+
+def test_eddsa_not_in_allowlist_is_rejected(ed25519_keys: tuple[bytes, bytes]) -> None:
+    # token EdDSA legítimo, mas allowlist só permite RS256 -> fora da allowlist
+    private_pem, public_pem = ed25519_keys
+    token = sign_eddsa({"sub": "ed", "exp": NOW + 60, "iat": NOW}, private_pem)
+    with pytest.raises(InvalidToken):
+        validate(token, key=public_pem, algorithms=["RS256"], now=NOW)

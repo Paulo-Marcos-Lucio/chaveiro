@@ -88,7 +88,7 @@ from chaveiro.reference.secure_validation import validate, InvalidToken
 # allowlist FIXA de algoritmos, rejeita 'none', confere assinatura + exp/nbf + aud/iss
 claims = validate(
     token,
-    key=public_key_pem,          # segredo HMAC (HS*) ou chave pública PEM (RS*/ES*)
+    key=public_key_pem,          # segredo HMAC (HS*) ou chave pública PEM (RS*/PS*/ES*/EdDSA)
     algorithms=["RS256"],        # nunca leia o alg do token
     audience="minha-api",
     issuer="https://auth.exemplo",
@@ -103,7 +103,7 @@ O que torna essa função segura está documentado nela mesma — é o material 
 
 ```
 src/chaveiro/
-├── core/        # jwt (base64url, HMAC, verificação RS/ES via cryptography), modelos
+├── core/        # jwt (base64url, HMAC, verificação RS/PS/ES/EdDSA via cryptography), modelos
 ├── checks/      # catálogo declarativo + detectores (alg, header, claims, payload)
 ├── attacks/     # crack (dicionário HMAC) e confusion (PoC RS→HS)
 ├── reference/   # validação CORRETA, documentada — o lado da correção
@@ -121,7 +121,7 @@ Ferramentas de ataque (`crack`, `forge`, `forge-confusion`) são para **sistemas
 
 ## 🧭 Roadmap
 
-- [ ] Verificação de assinatura PS*/EdDSA na referência.
+- [x] Verificação de assinatura PS*/EdDSA na referência.
 - [ ] Detecção de `jwt` confusion via `cty`/nested tokens.
 - [ ] Modo batch (auditar muitos tokens de um arquivo/log).
 - [ ] Checagem de tamanho mínimo de segredo HMAC por análise de força.

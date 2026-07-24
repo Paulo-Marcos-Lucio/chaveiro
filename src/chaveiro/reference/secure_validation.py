@@ -20,7 +20,18 @@ from typing import Any
 from chaveiro.core.jwt import decode, verify_asymmetric, verify_hmac
 
 _HS = {"HS256", "HS384", "HS512"}
-_ASYM = {"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"}
+_ASYM = {
+    "RS256",
+    "RS384",
+    "RS512",
+    "PS256",
+    "PS384",
+    "PS512",
+    "ES256",
+    "ES384",
+    "ES512",
+    "EdDSA",
+}
 
 
 class InvalidToken(Exception):
@@ -40,7 +51,8 @@ def validate(
     """Valida um JWT com política estrita e devolve o payload confiável.
 
     ``algorithms`` é uma **allowlist obrigatória** — sem ela, tudo o mais é
-    inútil. ``key`` é o segredo HMAC (para HS*) ou a chave pública PEM (RS*/ES*).
+    inútil. ``key`` é o segredo HMAC (para HS*) ou a chave pública PEM
+    (RS*/PS*/ES*/EdDSA).
     """
     if not algorithms:
         raise InvalidToken("defina uma allowlist de algoritmos (nunca aceite o alg do token)")
