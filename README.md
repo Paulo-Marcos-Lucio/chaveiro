@@ -88,8 +88,8 @@ from chaveiro.reference.secure_validation import validate, InvalidToken
 # allowlist FIXA de algoritmos, rejeita 'none', confere assinatura + exp/nbf + aud/iss
 claims = validate(
     token,
-    key=public_key_pem,          # segredo HMAC (HS*) ou chave pública PEM (RS*/PS*/ES*/EdDSA)
-    algorithms=["RS256"],        # nunca leia o alg do token
+    key=public_key_pem,  # segredo HMAC (HS*) ou chave pública PEM (RS*/PS*/ES*/EdDSA)
+    algorithms=["RS256"],  # nunca leia o alg do token
     audience="minha-api",
     issuer="https://auth.exemplo",
 )
