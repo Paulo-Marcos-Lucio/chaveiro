@@ -165,6 +165,25 @@ CATALOG: dict[str, CheckMeta] = {
             None,
         ),
         CheckMeta(
+            "header-cty-nested",
+            "JWT aninhado declarado ('cty: JWT')",
+            Severity.MEDIUM,
+            "JWT aninhado (RFC 7519 §5.2): o payload da casca deveria ser outro JWT. Verifique a "
+            "assinatura das DUAS camadas, com allowlist de algoritmos em cada uma; nunca confie no "
+            "token interno sem validá-lo (assinatura, alg, exp, aud/iss).",
+            "A07:2021 Identification and Authentication Failures",
+            "CWE-347",
+        ),
+        CheckMeta(
+            "payload-nested-jwt",
+            "Payload aparenta conter outro JWT",
+            Severity.LOW,
+            "Uma claim carrega o que parece ser outro JWT. Se um token embute outro, valide o token "
+            "interno com o mesmo rigor da casca antes de confiar nele — não o repasse como confiável.",
+            "A07:2021 Identification and Authentication Failures",
+            "CWE-347",
+        ),
+        CheckMeta(
             "payload-sensitive",
             "Dado sensível no payload",
             Severity.MEDIUM,

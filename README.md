@@ -44,6 +44,8 @@ O Chaveiro cobre esses vetores dos dois lados: **audita** um token, **prova** a 
 | `header-kid-injection` | `kid` com `../`, `'`, `;` → path traversal / SQLi | 🟠 Alta | A03 · CWE-91 |
 | `claim-no-exp` / `claim-long-lifetime` | Token eterno / longevo demais | 🟠/🟡 | A07 · CWE-613 |
 | `claim-no-aud` / `claim-no-iss` / `claim-no-iat` | Falta amarração de destino/emissor | 🔵 Baixa | A07 · CWE-345 |
+| `header-cty-nested` | `cty: JWT` → token aninhado; verificador pode validar só a casca | 🟡 Média | A07 · CWE-347 |
+| `payload-nested-jwt` | Claim carrega outro JWT (token embutido/aninhado) | 🔵 Baixa | A07 · CWE-347 |
 | `payload-sensitive` | Segredo/PII no payload (JWT é base64, **não** cifrado) | 🟡 Média | A02 · CWE-522 |
 
 ---
@@ -127,7 +129,7 @@ Ferramentas de ataque (`crack`, `forge`, `forge-confusion`) são para **sistemas
 ## 🧭 Roadmap
 
 - [x] Verificação de assinatura PS*/EdDSA na referência.
-- [ ] Detecção de `jwt` confusion via `cty`/nested tokens.
+- [x] Detecção de `jwt` confusion via `cty`/nested tokens.
 - [x] Modo batch (auditar muitos tokens de um arquivo/log).
 - [ ] Checagem de tamanho mínimo de segredo HMAC por análise de força.
 

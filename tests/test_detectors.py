@@ -58,6 +58,31 @@ def test_hmac_advisory() -> None:
     assert "alg-hmac-advisory" in _ids(token)
 
 
+def test_cty_jwt_flags_nested() -> None:
+    token = hs_token({"exp": NOW + 60, "iat": NOW, "aud": "x", "iss": "y"}, cty="JWT")
+    assert "header-cty-nested" in _ids(token)
+
+
+def test_cty_application_jwt_variation_flags_nested() -> None:
+    # RFC 7515 §4.1.10: "application/" pode ser omitido e a comparação é case-insensitive.
+    token = hs_token({"exp": NOW + 60, "iat": NOW, "aud": "x", "iss": "y"}, cty="application/jwt")
+    assert "header-cty-nested" in _ids(token)
+
+
+def test_nested_jwt_in_claim_flags() -> None:
+    inner = hs_token({"exp": NOW + 60, "iat": NOW, "aud": "x", "iss": "y", "role": "admin"})
+    outer = hs_token({"exp": NOW + 60, "iat": NOW, "aud": "x", "iss": "y", "assertion": inner})
+    assert "payload-nested-jwt" in _ids(outer)
+
+
+def test_normal_token_has_no_nesting_findings() -> None:
+    # Negativo: sem 'cty' e sem claim parecida com JWT — nenhum sinal de aninhamento.
+    token = hs_token({"exp": NOW + 60, "iat": NOW, "aud": "x", "iss": "y", "sub": "a.b.c"})
+    ids = _ids(token)
+    assert "header-cty-nested" not in ids
+    assert "payload-nested-jwt" not in ids
+
+
 def test_well_formed_rs_token_is_clean() -> None:
     token = raw_token(
         {"alg": "RS256", "typ": "JWT"},
