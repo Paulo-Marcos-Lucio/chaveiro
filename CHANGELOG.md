@@ -7,6 +7,15 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
 
 ### Adicionado
 
+- **Detecção de JWT confusion por aninhamento** (checagem passiva, sem rede):
+  `header-cty-nested` sinaliza quando o cabeçalho declara `cty: JWT` (comparação
+  case-insensitive e com o prefixo `application/` opcional — RFC 7515 §4.1.10 /
+  RFC 7519 §5.2), indicando um token aninhado cuja casca um verificador pode
+  validar sem checar o miolo; `payload-nested-jwt` sinaliza quando uma claim
+  carrega o que aparenta ser outro JWS compacto (heurística conservadora: 3
+  segmentos e um cabeçalho base64url que decodifica para um objeto JSON com
+  `alg`). Ambas com A07 · CWE-347. Fecha o item de roadmap "jwt confusion via
+  cty/nested tokens".
 - **Modo batch** (`chaveiro batch`): audita vários tokens — um por linha — de um
   arquivo ou do stdin (`-`), reusando o mesmo pipeline de auditoria passiva do
   `inspect`. Ignora linhas em branco e comentários (`#`) e remove um prefixo

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from typing import Any
 
 from chaveiro.checks.catalog import make_finding
+from chaveiro.core.jwt import JWTError, b64url_decode
 from chaveiro.core.models import DecodedToken, Finding
 
 _KNOWN_ALGS = {
@@ -26,12 +28,16 @@ _SENSITIVE_KEYS = {
     "token", "access_token", "refresh_token", "private_key",
 }  # fmt: skip
 _CPF = re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b")
+# RFC 7515 §4.1.10 / RFC 7519 §5.2: comparação case-insensitive e o prefixo
+# "application/" pode ser omitido — "JWT" marca um token aninhado.
+_CTY_NESTED = {"jwt", "application/jwt"}
 
 
 def run_all(token: DecodedToken, now: int) -> list[Finding]:
     findings: list[Finding] = []
     findings += check_alg(token)
     findings += check_header(token)
+    findings += check_nesting(token)
     findings += check_claims(token, now)
     findings += check_payload(token)
     return findings
@@ -98,6 +104,36 @@ def check_header(token: DecodedToken) -> list[Finding]:
     return out
 
 
+def check_nesting(token: DecodedToken) -> list[Finding]:
+    """Sinaliza o vetor de JWT confusion por aninhamento (cty / token embutido).
+
+    Passiva: apenas observa que o cabeçalho declara um JWT aninhado ('cty: JWT')
+    e/ou que alguma claim carrega o que aparenta ser outro JWT. Não valida
+    assinatura nem faz rede — só aponta a superfície de confusão.
+    """
+    out: list[Finding] = []
+    cty = token.header.get("cty")
+    if isinstance(cty, str) and cty.strip().lower() in _CTY_NESTED:
+        out.append(
+            make_finding(
+                "header-cty-nested",
+                "O cabeçalho declara 'cty' de JWT aninhado — o payload deveria ser outro JWT. "
+                "Um verificador que valida só a casca e confia no miolo sem checá-lo é enganável.",
+                evidence=f"cty={cty!r}",
+            )
+        )
+    for key, value in token.payload.items():
+        if isinstance(value, str) and _looks_like_jwt(value):
+            out.append(
+                make_finding(
+                    "payload-nested-jwt",
+                    f"A claim {key!r} contém o que aparenta ser outro JWT (token aninhado).",
+                    evidence=f"{key}=<jwt>",
+                )
+            )
+    return out
+
+
 def check_claims(token: DecodedToken, now: int) -> list[Finding]:
     out: list[Finding] = []
     payload = token.payload
@@ -145,6 +181,20 @@ def check_payload(token: DecodedToken) -> list[Finding]:
                 )
             )
     return out
+
+
+def _looks_like_jwt(value: str) -> bool:
+    """True se ``value`` tem a cara de um JWS compacto: 3 segmentos e um cabeçalho
+    base64url que decodifica para um objeto JSON com 'alg'. Heurística conservadora
+    (exige o cabeçalho decodificável) para evitar falso-positivo em strings pontuadas."""
+    parts = value.split(".")
+    if len(parts) != 3:
+        return False
+    try:
+        header = json.loads(b64url_decode(parts[0]))
+    except (JWTError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    return isinstance(header, dict) and "alg" in header
 
 
 def _as_epoch(value: Any) -> int | None:
