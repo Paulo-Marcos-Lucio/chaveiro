@@ -15,7 +15,7 @@ from typing import Any
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
+from cryptography.hazmat.primitives.asymmetric import ec, ed448, ed25519, padding, rsa
 from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
@@ -37,6 +37,14 @@ _EC_HASH: dict[str, hashes.HashAlgorithm] = {
     "ES384": hashes.SHA384(),
     "ES512": hashes.SHA512(),
 }
+# RSASSA-PSS (RFC 7518 §3.5): MGF1 e salt do mesmo tamanho da saída do hash.
+_PSS_HASH: dict[str, hashes.HashAlgorithm] = {
+    "PS256": hashes.SHA256(),
+    "PS384": hashes.SHA384(),
+    "PS512": hashes.SHA512(),
+}
+# EdDSA (RFC 8037): 'alg' único; a curva vem do tipo da chave (Ed25519/Ed448).
+_EDDSA = "EdDSA"
 
 
 class JWTError(ValueError):
@@ -126,7 +134,18 @@ def encode_hmac(header: dict[str, Any], payload: dict[str, Any], secret: bytes) 
 
 
 def verify_asymmetric(token: DecodedToken, public_key_pem: bytes) -> bool:
-    """Verifica assinatura RS*/ES* com uma chave pública PEM."""
+    """Verifica assinatura RS*/PS*/ES*/EdDSA com uma chave pública PEM.
+
+    Cobre as famílias assimétricas do JOSE (RFC 7518) mais EdDSA (RFC 8037):
+
+    - ``RS*`` — RSASSA-PKCS1-v1_5;
+    - ``PS*`` — RSASSA-PSS com MGF1 e salt do tamanho do hash;
+    - ``ES*`` — ECDSA (assinatura crua R||S convertida para DER);
+    - ``EdDSA`` — Ed25519/Ed448 (assina o ``signing_input`` sem pré-hash).
+
+    Retorna ``False`` (nunca levanta) para assinatura inválida ou para
+    par alg/chave incompatível — o chamador decide a política.
+    """
     key = load_pem_public_key(public_key_pem)
     try:
         if token.alg in _RSA_HASH and isinstance(key, rsa.RSAPublicKey):
@@ -135,6 +154,18 @@ def verify_asymmetric(token: DecodedToken, public_key_pem: bytes) -> bool:
                 token.signing_input,
                 padding.PKCS1v15(),
                 _RSA_HASH[token.alg],
+            )
+            return True
+        if token.alg in _PSS_HASH and isinstance(key, rsa.RSAPublicKey):
+            hash_alg = _PSS_HASH[token.alg]
+            key.verify(
+                token.signature,
+                token.signing_input,
+                padding.PSS(
+                    mgf=padding.MGF1(hash_alg),
+                    salt_length=padding.PSS.DIGEST_LENGTH,
+                ),
+                hash_alg,
             )
             return True
         if token.alg in _EC_HASH and isinstance(key, ec.EllipticCurvePublicKey):
@@ -149,6 +180,12 @@ def verify_asymmetric(token: DecodedToken, public_key_pem: bytes) -> bool:
                 token.signing_input,
                 ec.ECDSA(_EC_HASH[token.alg]),
             )
+            return True
+        if token.alg == _EDDSA and isinstance(
+            key, (ed25519.Ed25519PublicKey, ed448.Ed448PublicKey)
+        ):
+            # EdDSA assina a mensagem diretamente (sem pré-hash separado).
+            key.verify(token.signature, token.signing_input)
             return True
     except InvalidSignature:
         return False

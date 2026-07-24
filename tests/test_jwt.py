@@ -8,9 +8,10 @@ from chaveiro.core.jwt import (
     b64url_encode,
     decode,
     encode_hmac,
+    verify_asymmetric,
     verify_hmac,
 )
-from tests.conftest import hs_token
+from tests.conftest import hs_token, sign_eddsa, sign_ps256
 
 
 def test_b64url_roundtrip() -> None:
@@ -42,3 +43,40 @@ def test_decode_rejects_malformed() -> None:
         decode("only.two")
     with pytest.raises(JWTError):
         decode("not-a-jwt")
+
+
+def test_verify_asymmetric_ps256_roundtrip(rsa_keys: tuple[bytes, bytes]) -> None:
+    private_pem, public_pem = rsa_keys
+    token = sign_ps256({"sub": "x"}, private_pem)
+    assert verify_asymmetric(decode(token), public_pem)
+    # assinatura adulterada não passa
+    bad = decode(token[:-4] + ("AAAA" if not token.endswith("AAAA") else "BBBB"))
+    assert not verify_asymmetric(bad, public_pem)
+
+
+def test_verify_asymmetric_eddsa_roundtrip(ed25519_keys: tuple[bytes, bytes]) -> None:
+    private_pem, public_pem = ed25519_keys
+    decoded = decode(sign_eddsa({"sub": "x"}, private_pem))
+    assert verify_asymmetric(decoded, public_pem)
+
+
+def test_verify_asymmetric_eddsa_rejects_tampered(ed25519_keys: tuple[bytes, bytes]) -> None:
+    private_pem, public_pem = ed25519_keys
+    token = sign_eddsa({"sub": "x"}, private_pem)
+    tampered = decode(token[:-4] + ("AAAA" if not token.endswith("AAAA") else "BBBB"))
+    assert not verify_asymmetric(tampered, public_pem)
+
+
+def test_verify_asymmetric_alg_key_mismatch_is_false(ed25519_keys: tuple[bytes, bytes]) -> None:
+    # token EdDSA verificado contra chave RSA (mismatch alg/chave) -> False, sem exceção
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    ed_priv, _ = ed25519_keys
+    decoded = decode(sign_eddsa({"sub": "x"}, ed_priv))
+    rsa_pub = (
+        rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        .public_key()
+        .public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+    )
+    assert not verify_asymmetric(decoded, rsa_pub)
