@@ -18,12 +18,12 @@ from chaveiro import __version__
 from chaveiro.attacks.confusion import forge_rs_to_hs
 from chaveiro.attacks.crack import crack as crack_secret
 from chaveiro.attacks.crack import crack_with_defaults
+from chaveiro.audit import audit_batch, audit_token, summarize
 from chaveiro.checks.catalog import CATALOG
-from chaveiro.checks.detectors import run_all
 from chaveiro.core.jwt import JWTError, decode, encode_hmac
-from chaveiro.core.models import AuditResult, Severity
+from chaveiro.core.models import Severity
 from chaveiro.report import console as console_report
-from chaveiro.report.json_report import to_json
+from chaveiro.report.json_report import batch_to_json, to_json
 
 app = typer.Typer(
     add_completion=False,
@@ -98,16 +98,61 @@ def inspect(
     fail_on: FailOn = typer.Option(FailOn.high, "--fail-on", help="Severidade que faz sair com 1."),
 ) -> None:
     """Decodifica e roda todas as checagens passivas de segurança."""
-    decoded = _decode_or_die(token)
-    result = AuditResult(
-        token=decoded, findings=run_all(decoded, now if now is not None else int(time.time()))
-    )
+    try:
+        result = audit_token(token, now if now is not None else int(time.time()))
+    except JWTError as exc:
+        err.print(f"[red]Token inválido:[/] {exc}")
+        raise typer.Exit(2) from exc
     if fmt is Format.json:
         typer.echo(to_json(result))
     else:
         console_report.render(result)
     top = result.max_severity()
     raise typer.Exit(1 if top is not None and top.rank >= fail_on.rank() else 0)
+
+
+def _read_source(path: Path | None) -> str:
+    if path is None or str(path) == "-":
+        return sys.stdin.read()
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        err.print(f"[red]Não consegui ler {path}:[/] {exc}")
+        raise typer.Exit(2) from exc
+
+
+@app.command()
+def batch(
+    path: Path | None = typer.Argument(
+        None, help="Arquivo com um token por linha; '-' ou omitir lê do stdin."
+    ),
+    fmt: Format = typer.Option(Format.console, "--format", "-f", help="Formato de saída."),
+    now: int | None = typer.Option(None, "--now", help="Epoch a usar como 'agora' (para testes)."),
+    fail_on: FailOn = typer.Option(
+        FailOn.high, "--fail-on", help="Pior severidade do lote que faz sair com 1."
+    ),
+) -> None:
+    """Audita vários tokens (um por linha) de um arquivo ou stdin.
+
+    Ignora linhas em branco e comentários (#) e remove um prefixo 'Bearer '
+    opcional. Reporta cada token e um resumo agregado. Sai com 1 se algum token
+    atingir --fail-on, 2 se algum estiver malformado (sem atingir o limiar), 0
+    caso contrário.
+    """
+    text = _read_source(path)
+    outcomes = audit_batch(text, now if now is not None else int(time.time()))
+    if not outcomes:
+        err.print("[yellow]Nenhum token encontrado na entrada.[/]")
+        raise typer.Exit(2)
+    if fmt is Format.json:
+        typer.echo(batch_to_json(outcomes))
+    else:
+        console_report.render_batch(outcomes)
+    summary = summarize(outcomes)
+    worst = summary.max_severity
+    if worst is not None and worst.rank >= fail_on.rank():
+        raise typer.Exit(1)
+    raise typer.Exit(2 if summary.errors else 0)
 
 
 @app.command()

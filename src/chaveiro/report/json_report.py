@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from chaveiro import __version__
+from chaveiro.audit import TokenOutcome, summarize
 from chaveiro.core.models import AuditResult, Finding
 
 
@@ -42,3 +43,33 @@ def to_document(result: AuditResult) -> dict[str, Any]:
 
 def to_json(result: AuditResult) -> str:
     return json.dumps(to_document(result), indent=2, ensure_ascii=False)
+
+
+def _outcome_to_dict(outcome: TokenOutcome) -> dict[str, Any]:
+    return {
+        "index": outcome.index,
+        "line": outcome.line,
+        "error": outcome.error,
+        "audit": to_document(outcome.result) if outcome.result is not None else None,
+    }
+
+
+def batch_to_document(outcomes: list[TokenOutcome]) -> dict[str, Any]:
+    summary = summarize(outcomes)
+    return {
+        "tool": "chaveiro",
+        "version": __version__,
+        "mode": "batch",
+        "summary": {
+            "tokens": summary.tokens,
+            "audited": summary.audited,
+            "errors": summary.errors,
+            "by_severity": summary.by_severity,
+            "max_severity": summary.max_severity.value if summary.max_severity else None,
+        },
+        "results": [_outcome_to_dict(o) for o in outcomes],
+    }
+
+
+def batch_to_json(outcomes: list[TokenOutcome]) -> str:
+    return json.dumps(batch_to_document(outcomes), indent=2, ensure_ascii=False)

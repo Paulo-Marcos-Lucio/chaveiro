@@ -67,6 +67,10 @@ chaveiro inspect "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhZG1pbiJ9."
 # em JSON, para pipelines
 chaveiro inspect "$TOKEN" -f json --fail-on high
 
+# audita vários tokens de uma vez (um por linha; ignora branco/comentário e prefixo 'Bearer')
+chaveiro batch tokens.txt --fail-on high        # sai 1 se algum token atingir o limiar
+cat access.log | chaveiro batch - -f json        # lê do stdin, resumo agregado em JSON
+
 # o segredo HMAC é fraco? (ataque de dicionário — lista embutida + sua wordlist)
 chaveiro crack "$TOKEN" --wordlist rockyou.txt
 
@@ -108,6 +112,7 @@ src/chaveiro/
 ├── attacks/     # crack (dicionário HMAC) e confusion (PoC RS→HS)
 ├── reference/   # validação CORRETA, documentada — o lado da correção
 ├── report/      # console (rich) e json
+├── audit.py     # orquestração: auditar um token e em lote (batch)
 └── cli.py       # interface typer
 ```
 
@@ -123,7 +128,7 @@ Ferramentas de ataque (`crack`, `forge`, `forge-confusion`) são para **sistemas
 
 - [x] Verificação de assinatura PS*/EdDSA na referência.
 - [ ] Detecção de `jwt` confusion via `cty`/nested tokens.
-- [ ] Modo batch (auditar muitos tokens de um arquivo/log).
+- [x] Modo batch (auditar muitos tokens de um arquivo/log).
 - [ ] Checagem de tamanho mínimo de segredo HMAC por análise de força.
 
 ---
