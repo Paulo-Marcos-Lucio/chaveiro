@@ -10,7 +10,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from chaveiro.core.models import AuditResult, Finding, Severity
+from chaveiro.audit import TokenOutcome, summarize
+from chaveiro.core.models import AuditResult, DecodedToken, Finding, Severity
 
 _STYLE: dict[Severity, str] = {
     Severity.CRITICAL: "bold white on red",
@@ -77,3 +78,55 @@ def _short_owasp(finding: Finding) -> str:
     if not finding.owasp:
         return "—"
     return finding.owasp.split(":")[0]
+
+
+def _describe(token: DecodedToken) -> str:
+    """Identificador curto e legível de um token para a tabela do lote."""
+    subject = token.payload.get("sub") or token.payload.get("iss")
+    label = f" · {subject}" if isinstance(subject, str) and subject else ""
+    return f"alg={token.alg or '—'}{label}"
+
+
+def render_batch(outcomes: list[TokenOutcome], console: Console | None = None) -> None:
+    console = console or Console()
+    table = Table(show_lines=False, expand=True, header_style="bold")
+    table.add_column("#", no_wrap=True, justify="right")
+    table.add_column("Linha", no_wrap=True, justify="right")
+    table.add_column("Token", overflow="fold")
+    table.add_column("Pior", no_wrap=True)
+    table.add_column("Achados", no_wrap=True, justify="right")
+    for outcome in outcomes:
+        if outcome.result is None:
+            token_desc = Text(f"[não decodificou] {outcome.error}", style="magenta")
+            severity = Text("ERRO", style="bold magenta")
+            count = "—"
+        else:
+            token_desc = Text(_describe(outcome.result.token))
+            top = outcome.result.max_severity()
+            severity = (
+                Text(top.value.upper(), style=_STYLE[top])
+                if top is not None
+                else Text("ok", style="green")
+            )
+            count = str(len(outcome.result.findings))
+        table.add_row(str(outcome.index), str(outcome.line), token_desc, severity, count)
+    console.print(table)
+    _render_batch_summary(outcomes, console)
+
+
+def _render_batch_summary(outcomes: list[TokenOutcome], console: Console) -> None:
+    summary = summarize(outcomes)
+    worst = summary.max_severity
+    worst_text = (
+        Text(worst.value.upper(), style=_STYLE[worst])
+        if worst is not None
+        else Text("nenhuma", style="green")
+    )
+    parts = [f"{sev}={n}" for sev, n in sorted(summary.by_severity.items())]
+    breakdown = ("  ·  " + "  ".join(parts)) if parts else ""
+    body = Text.assemble(
+        f"tokens={summary.tokens}  auditados={summary.audited}  erros={summary.errors}  pior=",
+        worst_text,
+        breakdown,
+    )
+    console.print(Panel(body, title="Resumo do lote", border_style="cyan"))

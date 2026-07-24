@@ -7,6 +7,15 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
 
 ### Adicionado
 
+- **Modo batch** (`chaveiro batch`): audita vários tokens — um por linha — de um
+  arquivo ou do stdin (`-`), reusando o mesmo pipeline de auditoria passiva do
+  `inspect`. Ignora linhas em branco e comentários (`#`) e remove um prefixo
+  `Bearer ` opcional. Reporta cada token e um resumo agregado (console ou JSON,
+  `mode: "batch"`). Exit-code coerente com `--fail-on`: 1 se a pior severidade
+  do lote atingir o limiar, 2 se houver token malformado (sem atingir o limiar),
+  0 caso contrário. Um token malformado é reportado sem interromper o lote. Fecha
+  o item de roadmap "Modo batch". A composição decode + checagens virou
+  `audit.audit_token`, fonte única usada por `inspect` e `batch`.
 - Verificação de assinatura **PS256/PS384/PS512** (RSASSA-PSS, MGF1 e salt do
   tamanho do hash — RFC 7518 §3.5) e **EdDSA/Ed25519** (RFC 8037) em
   `core.jwt.verify_asymmetric`, e ambos na allowlist do módulo de referência.
