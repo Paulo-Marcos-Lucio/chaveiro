@@ -1,3 +1,5 @@
+<a href="https://paulo-marcos-lucio.github.io"><img src="https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/banner-abismo.svg" alt="Chaveiro — as chaves que flutuam no escuro: auditor de segurança de tokens JWT/JWS" width="100%"/></a>
+
 <div align="center">
 
 # 🗝️ Chaveiro
@@ -102,6 +104,25 @@ claims = validate(
 ```
 
 O que torna essa função segura está documentado nela mesma — é o material que entrego ao cliente junto do diagnóstico.
+
+---
+
+## 🔓 Versão Pro (privada) — auditoria guiada do seu fluxo de auth
+
+Aqui está o ferramental. A **versão Pro é privada**: a **auditoria completa do seu fluxo de autenticação** (JWT/JWS, OAuth2/OIDC, Open Finance/FAPI), conduzida por quem **construiu** esse tipo de integração — com PoC autorizado da falha e a **validação de referência aplicada ao seu código**, não só documentada.
+
+- 🔑 Revisão do **emissor e do verificador** (onde 90% dos bypasses moram);
+- 🧪 PoC autorizado que comprova a falha para justificar a correção;
+- 🛡️ Validação segura implementada no seu stack, com teste.
+
+> **Sua autenticação usa JWT?** Vale uma revisão antes que alguém troque o `alg` por você.
+
+<div align="center">
+
+[![Pacotes e valores](https://img.shields.io/badge/Pacotes_e_valores-paulo--marcos--lucio.github.io-0f766e?style=for-the-badge)](https://paulo-marcos-lucio.github.io)
+[![Falar no LinkedIn](https://img.shields.io/badge/LinkedIn-Falar_agora-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/paulo-marcos-a07379174/)
+
+</div>
 
 ---
 
