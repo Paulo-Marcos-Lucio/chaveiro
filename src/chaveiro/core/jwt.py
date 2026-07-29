@@ -11,6 +11,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 from typing import Any
 
 from cryptography.exceptions import InvalidSignature
@@ -46,6 +47,13 @@ _PSS_HASH: dict[str, hashes.HashAlgorithm] = {
 # EdDSA (RFC 8037): 'alg' único; a curva vem do tipo da chave (Ed25519/Ed448).
 _EDDSA = "EdDSA"
 
+# RFC 7515 §2: base64url, alfabeto -_ e **sem** padding.
+_B64URL = re.compile(r"[A-Za-z0-9_-]*")
+# Teto de aninhamento de header/payload. Nenhum JWT legítimo passa de poucos
+# níveis; medido nesta máquina: json.dumps(indent=2) estoura em 996 níveis e
+# json.loads em 2.998 — o teto protege decodificação, render e serialização.
+MAX_JSON_DEPTH = 64
+
 
 class JWTError(ValueError):
     """Token malformado ou operação inválida."""
@@ -57,6 +65,18 @@ class JWTError(ValueError):
 
 
 def b64url_decode(segment: str) -> bytes:
+    """Decodifica um segmento em base64url **estrito** (RFC 7515 §2).
+
+    A validação do alfabeto é deliberada: ``base64.urlsafe_b64decode`` descarta
+    em silêncio qualquer byte fora do alfabeto (espaço, ``!``, quebra de linha) e
+    ainda aceita base64 padrão (``+/``). Um auditor tolerante decodifica um token
+    que nenhum verificador aceita — e passa a laudar um token que não existe.
+    """
+    if not _B64URL.fullmatch(segment):
+        raise JWTError(
+            f"segmento não é base64url estrito (RFC 7515 §2: alfabeto A-Za-z0-9-_ "
+            f"e sem padding '='): {segment[:12]}…"
+        )
     padding_needed = (-len(segment)) % 4
     try:
         return base64.urlsafe_b64decode(segment + "=" * padding_needed)
@@ -74,14 +94,20 @@ def b64url_encode(data: bytes) -> str:
 
 
 def decode(token: str) -> DecodedToken:
-    """Decodifica um JWS compacto em suas partes, **sem verificar assinatura**."""
+    """Decodifica um JWS compacto em suas partes, **sem verificar assinatura**.
+
+    Cobre as duas formas do RFC 7519: o JWT comum (payload = objeto JSON) e o
+    **JWT aninhado** (§5.2), cujo payload é outro JWS compacto. No aninhado,
+    ``payload`` fica vazio — a casca não tem claims próprias — e ``nested``
+    guarda o token interno, que precisa ser auditado à parte.
+    """
     token = token.strip()
     parts = token.split(".")
     if len(parts) != 3:
         raise JWTError(f"esperados 3 segmentos separados por ponto, encontrei {len(parts)}")
     header_b64, payload_b64, sig_b64 = parts
     header = _decode_json(header_b64, "header")
-    payload = _decode_json(payload_b64, "payload")
+    payload, nested = _decode_payload(payload_b64)
     signature = b64url_decode(sig_b64)
     signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
     return DecodedToken(
@@ -90,17 +116,99 @@ def decode(token: str) -> DecodedToken:
         payload=payload,
         signature=signature,
         signing_input=signing_input,
+        nested=nested,
     )
 
 
-def _decode_json(segment: str, what: str) -> dict[str, Any]:
+def parse_json_limited(raw: bytes, what: str) -> Any:
+    """``json.loads`` com teto **explícito** de aninhamento.
+
+    ``json.loads`` é recursivo: um documento profundo o bastante derruba o
+    processo com ``RecursionError``, e ``json.dumps`` (usado pelos relatórios)
+    estoura antes ainda. Por isso a profundidade é medida **antes** do parse,
+    varrendo os bytes uma vez, sem recursão — assim decodificação, render e
+    serialização ficam protegidos de uma vez só. Tudo o que é entrada hostil
+    vira ``JWTError``, que o chamador já sabe tratar.
+    """
+    depth = _nesting_depth(raw)
+    if depth > MAX_JSON_DEPTH:
+        raise JWTError(f"{what} aninhado demais: {depth} níveis (teto {MAX_JSON_DEPTH})")
     try:
-        data = json.loads(b64url_decode(segment))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exc:
         raise JWTError(f"{what} não é JSON UTF-8 válido") from exc
+
+
+def _nesting_depth(raw: bytes) -> int:
+    """Profundidade máxima de ``{``/``[`` do texto, medida **sem recursão**.
+
+    Ignora o conteúdo de strings, onde chave e colchete são texto e não
+    estrutura. Varre bytes: todos os delimitadores JSON são ASCII e UTF-8 é
+    auto-sincronizante, então byte a byte é seguro.
+    """
+    depth = deepest = 0
+    in_string = escaped = False
+    for byte in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif byte == 0x5C:  # \
+                escaped = True
+            elif byte == 0x22:  # "
+                in_string = False
+        elif byte == 0x22:
+            in_string = True
+        elif byte in (0x7B, 0x5B):  # { [
+            depth += 1
+            deepest = max(deepest, depth)
+        elif byte in (0x7D, 0x5D):  # } ]
+            depth -= 1
+    return deepest
+
+
+def looks_like_jws(value: str) -> bool:
+    """True se ``value`` tem a cara de um JWS compacto: 3 segmentos e um cabeçalho
+    base64url que decodifica para um objeto JSON com 'alg'. Heurística
+    conservadora (exige o cabeçalho decodificável) para evitar falso-positivo em
+    strings pontuadas."""
+    parts = value.split(".")
+    if len(parts) != 3:
+        return False
+    try:
+        header = parse_json_limited(b64url_decode(parts[0]), "header")
+    except JWTError:
+        return False
+    return isinstance(header, dict) and "alg" in header
+
+
+def _decode_json(segment: str, what: str) -> dict[str, Any]:
+    data = parse_json_limited(b64url_decode(segment), what)
     if not isinstance(data, dict):
         raise JWTError(f"{what} deve ser um objeto JSON")
     return data
+
+
+def _decode_payload(segment: str) -> tuple[dict[str, Any], str | None]:
+    """Payload de um JWT comum (objeto JSON) ou de um JWT aninhado (RFC 7519 §5.2)."""
+    raw = b64url_decode(segment)
+    try:
+        data = parse_json_limited(raw, "payload")
+    except JWTError:
+        nested = _as_nested_jws(raw)
+        if nested is None:
+            raise
+        return {}, nested
+    if not isinstance(data, dict):
+        raise JWTError("payload deve ser um objeto JSON (ou um JWS compacto, se aninhado)")
+    return data, None
+
+
+def _as_nested_jws(raw: bytes) -> str | None:
+    try:
+        text = raw.decode("ascii").strip()
+    except UnicodeDecodeError:
+        return None
+    return text if looks_like_jws(text) else None
 
 
 # --------------------------------------------------------------------------- #

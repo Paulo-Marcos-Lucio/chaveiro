@@ -30,13 +30,37 @@ def test_inspect_none_token_json_exit1() -> None:
     result = runner.invoke(app, ["inspect", token, "-f", "json", "--now", str(NOW)])
     assert result.exit_code == 1
     doc = json.loads(result.stdout)
-    assert any(f["check"] == "alg-none" for f in doc["findings"])
+    assert any(f["id"] == "alg-none" for f in doc["findings"])
 
 
 def test_crack_finds_weak_secret() -> None:
     token = hs_token({"sub": "a"}, secret="secret")
     result = runner.invoke(app, ["crack", token])
     assert result.exit_code == 1
+
+
+def test_crack_wordlist_streaming(tmp_path: Path) -> None:
+    # A wordlist é lida como gerador (linha a linha); o segredo no meio do
+    # arquivo é encontrado sem materializar a lista inteira.
+    wl = tmp_path / "wl.txt"
+    wl.write_text("nope\ncorrect-horse\nother\n", encoding="utf-8")
+    token = hs_token({"sub": "a"}, secret="correct-horse")
+    result = runner.invoke(app, ["crack", token, "--no-defaults", "--wordlist", str(wl)])
+    assert result.exit_code == 1
+
+
+def test_crack_wordlist_inexistente_exit2() -> None:
+    token = hs_token({"sub": "a"}, secret="x")
+    result = runner.invoke(app, ["crack", token, "--wordlist", "/nao/existe/rockyou.txt"])
+    assert result.exit_code == 2  # caminho inexistente -> erro de uso (Click)
+
+
+def test_comandos_ofensivos_avisam_autorizacao() -> None:
+    # crack/forge/forge-confusion têm que imprimir o aviso legal em tempo de execução.
+    token = hs_token({"sub": "a"}, secret="k")
+    for args in (["crack", token], ["forge", token, "--secret", "k"]):
+        result = runner.invoke(app, args)
+        assert "autoriza" in result.output.lower() or "12.737" in result.output
 
 
 def test_forge_confusion(tmp_path: Path, rsa_keys: tuple[bytes, bytes]) -> None:

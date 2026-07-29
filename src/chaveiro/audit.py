@@ -67,8 +67,12 @@ def iter_candidates(text: str) -> list[tuple[int, str]]:
 def audit_batch(text: str, now: int) -> list[TokenOutcome]:
     """Audita todos os candidatos a token do texto, preservando a ordem.
 
-    Um token malformado vira um `TokenOutcome` com `error` — não interrompe o
-    lote nem contamina os demais.
+    Um token que falhe **por qualquer motivo** vira um `TokenOutcome` com
+    `error` — não interrompe o lote nem contamina os demais. O `except` é largo
+    de propósito: o modelo de ameaça aqui é "um arquivo de tokens colhidos de
+    log", ou seja, entrada hostil, e um lote não pode morrer por causa de uma
+    classe de falha que ninguém previu. O tipo da exceção vai no `error`, então
+    nada fica escondido.
     """
     outcomes: list[TokenOutcome] = []
     for index, (lineno, candidate) in enumerate(iter_candidates(text), start=1):
@@ -76,6 +80,9 @@ def audit_batch(text: str, now: int) -> list[TokenOutcome]:
             result = audit_token(candidate, now)
         except JWTError as exc:
             outcomes.append(TokenOutcome(index, lineno, candidate, None, str(exc)))
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            outcomes.append(TokenOutcome(index, lineno, candidate, None, error))
         else:
             outcomes.append(TokenOutcome(index, lineno, candidate, result, None))
     return outcomes
@@ -88,12 +95,14 @@ class BatchSummary:
     tokens: int  # candidatos processados
     audited: int  # decodificados com sucesso
     errors: int  # malformados
-    by_severity: dict[str, int]  # contagem de achados por severidade (todos os tokens)
+    by_severity: dict[str, int]  # contagem por severidade — sempre as 5 chaves
     max_severity: Severity | None  # pior severidade vista no lote
 
 
 def summarize(outcomes: list[TokenOutcome]) -> BatchSummary:
-    by_severity: dict[str, int] = {}
+    # As 5 chaves sempre presentes (inclusive zeradas): quem consome o JSON não
+    # precisa distinguir "zero achados" de "chave ausente".
+    by_severity: dict[str, int] = {s.value: 0 for s in Severity}
     worst: Severity | None = None
     audited = 0
     errors = 0
@@ -103,8 +112,7 @@ def summarize(outcomes: list[TokenOutcome]) -> BatchSummary:
             continue
         audited += 1
         for finding in outcome.result.findings:
-            key = finding.severity.value
-            by_severity[key] = by_severity.get(key, 0) + 1
+            by_severity[finding.severity.value] += 1
         top = outcome.result.max_severity()
         if top is not None and (worst is None or top.rank > worst.rank):
             worst = top

@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # Sem isto, fixar a action por SHA congela a versão vulnerável para sempre.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: monthly

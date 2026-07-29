@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import math
 import re
+from collections.abc import Iterator
 from typing import Any
 
 from chaveiro.checks.catalog import make_finding
-from chaveiro.core.jwt import JWTError, b64url_decode
+from chaveiro.core.jwt import looks_like_jws
 from chaveiro.core.models import DecodedToken, Finding
 
 _KNOWN_ALGS = {
@@ -22,12 +22,23 @@ _HMAC_ALGS = {"HS256", "HS384", "HS512"}
 _LONG_LIFETIME_S = 24 * 3600
 
 _KID_DANGEROUS = ("..", "/", "\\", "'", '"', ";", "`", "$(", "|", "<", ">", "\x00", "\n")
+_TIME_CLAIMS = ("exp", "iat", "nbf")
+# Igualdade exata: termos que só são sinal quando são a chave inteira ('token'
+# como substring casaria com 'token_type: Bearer', que é ruído de OAuth).
 _SENSITIVE_KEYS = {
     "password", "passwd", "pwd", "senha",
     "secret", "client_secret", "api_key", "apikey",
     "token", "access_token", "refresh_token", "private_key",
 }  # fmt: skip
-_CPF = re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b")
+# Substring sobre a chave normalizada (minúscula, sem separadores): pega
+# 'user_password', 'dbSecret', 'x-api-key' — as formas compostas reais.
+_SENSITIVE_PARTS = ("password", "passwd", "pwd", "senha", "secret", "apikey", "privatekey")
+_NOT_ALNUM = re.compile(r"[^a-z0-9]")
+_NOT_DIGIT = re.compile(r"\D")
+# CPF nas duas formas de campo: pontuada e 11 dígitos crus. Os dígitos
+# verificadores são conferidos depois — sem isso, todo número de 11 dígitos
+# (telefone, id) viraria achado de LGPD.
+_CPF = re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b|\b\d{11}\b")
 # RFC 7515 §4.1.10 / RFC 7519 §5.2: comparação case-insensitive e o prefixo
 # "application/" pode ser omitido — "JWT" marca um token aninhado.
 _CTY_NESTED = {"jwt", "application/jwt"}
@@ -107,7 +118,8 @@ def check_header(token: DecodedToken) -> list[Finding]:
 def check_nesting(token: DecodedToken) -> list[Finding]:
     """Sinaliza o vetor de JWT confusion por aninhamento (cty / token embutido).
 
-    Passiva: apenas observa que o cabeçalho declara um JWT aninhado ('cty: JWT')
+    Passiva: observa que o cabeçalho declara um JWT aninhado ('cty: JWT'), que o
+    payload da casca **é** outro JWS compacto (aninhamento real, RFC 7519 §5.2)
     e/ou que alguma claim carrega o que aparenta ser outro JWT. Não valida
     assinatura nem faz rede — só aponta a superfície de confusão.
     """
@@ -122,8 +134,18 @@ def check_nesting(token: DecodedToken) -> list[Finding]:
                 evidence=f"cty={cty!r}",
             )
         )
+    if token.nested is not None:
+        out.append(
+            make_finding(
+                "payload-nested-jwt",
+                "O payload desta casca É outro JWS compacto (JWT aninhado, RFC 7519 §5.2): as "
+                "claims estão no token interno. Audite o token interno separadamente — a casca "
+                "sozinha não diz nada sobre expiração, emissor ou destinatário.",
+                evidence=f"payload = JWS compacto de {len(token.nested)} caracteres",
+            )
+        )
     for key, value in token.payload.items():
-        if isinstance(value, str) and _looks_like_jwt(value):
+        if isinstance(value, str) and looks_like_jws(value):
             out.append(
                 make_finding(
                     "payload-nested-jwt",
@@ -137,18 +159,42 @@ def check_nesting(token: DecodedToken) -> list[Finding]:
 def check_claims(token: DecodedToken, now: int) -> list[Finding]:
     out: list[Finding] = []
     payload = token.payload
+    if token.nested is not None:
+        # Casca de JWT aninhado: as claims vivem no token interno. Cobrar
+        # 'exp'/'aud'/'iss' da casca produziria quatro achados falsos.
+        return out
     exp = _as_epoch(payload.get("exp"))
     iat = _as_epoch(payload.get("iat"))
     nbf = _as_epoch(payload.get("nbf"))
+
+    for name in _TIME_CLAIMS:
+        if name in payload and _as_epoch(payload[name]) is None:
+            out.append(
+                make_finding(
+                    "claim-malformed-time",
+                    f"A claim {name!r} existe mas não é um NumericDate (RFC 7519 §2). Muitos "
+                    f"verificadores tratam claim temporal inválida como AUSENTE e seguem em "
+                    f"frente — o token deixa de expirar.",
+                    evidence=f"{name}={str(payload[name])[:60]!r}",
+                )
+            )
 
     if "exp" not in payload:
         out.append(make_finding("claim-no-exp", "O token não tem 'exp' — nunca expira."))
     elif exp is not None and exp < now:
         out.append(make_finding("claim-expired", f"'exp' já passou (exp={exp}, agora={now})."))
 
-    if exp is not None and iat is not None and (exp - iat) > _LONG_LIFETIME_S:
-        hours = round((exp - iat) / 3600, 1)
-        out.append(make_finding("claim-long-lifetime", f"Validade de ~{hours}h (exp - iat)."))
+    # Sem 'iat' a vida útil é aproximada por 'agora': um token de 10 anos sem
+    # 'iat' é MAIS perigoso, e era justo aí que a checagem se desligava.
+    if exp is not None:
+        base = "exp - iat" if iat is not None else "exp - agora, sem 'iat'"
+        lifetime = exp - iat if iat is not None else exp - now
+        if lifetime > _LONG_LIFETIME_S:
+            out.append(
+                make_finding(
+                    "claim-long-lifetime", f"Validade de ~{round(lifetime / 3600, 1)}h ({base})."
+                )
+            )
 
     if "iat" not in payload:
         out.append(make_finding("claim-no-iat", "Sem 'iat'."))
@@ -162,39 +208,78 @@ def check_claims(token: DecodedToken, now: int) -> list[Finding]:
 
 
 def check_payload(token: DecodedToken) -> list[Finding]:
+    """Procura segredo e dado pessoal em **qualquer profundidade** do payload.
+
+    `{"user": {"cpf": ...}}` é a forma mais comum de payload JWT no Brasil, então
+    varrer só o primeiro nível seria falso negativo na forma que mais aparece.
+    """
     out: list[Finding] = []
-    for key, value in token.payload.items():
-        if key.lower() in _SENSITIVE_KEYS and value not in (None, "", []):
+    for path, key, value in _walk(token.payload):
+        if _is_sensitive_key(key) and value not in (None, "", [], {}):
             out.append(
                 make_finding(
                     "payload-sensitive",
-                    f"A claim {key!r} parece carregar um segredo em texto claro.",
-                    evidence=f"{key}=…",
+                    f"A claim {path!r} parece carregar um segredo em texto claro.",
+                    evidence=f"{path}=…",
                 )
             )
-        elif isinstance(value, str) and _CPF.search(value):
+        elif isinstance(value, str) and _has_cpf(value):
             out.append(
                 make_finding(
                     "payload-sensitive",
-                    f"A claim {key!r} contém um CPF (dado pessoal — LGPD) no payload.",
-                    evidence=f"{key}=<cpf>",
+                    f"A claim {path!r} contém um CPF (dado pessoal — LGPD) no payload.",
+                    evidence=f"{path}=<cpf>",
                 )
             )
     return out
 
 
-def _looks_like_jwt(value: str) -> bool:
-    """True se ``value`` tem a cara de um JWS compacto: 3 segmentos e um cabeçalho
-    base64url que decodifica para um objeto JSON com 'alg'. Heurística conservadora
-    (exige o cabeçalho decodificável) para evitar falso-positivo em strings pontuadas."""
-    parts = value.split(".")
-    if len(parts) != 3:
+def _walk(payload: dict[str, Any]) -> Iterator[tuple[str, str, Any]]:
+    """Percorre o payload inteiro — dicts e listas aninhados — **sem recursão**.
+
+    Devolve ``(caminho, chave, valor)``; itens de lista vêm com chave vazia (não
+    têm nome, só posição). A profundidade já é limitada no decode
+    (``MAX_JSON_DEPTH``), mas a pilha explícita torna isso independente disso.
+    """
+    stack: list[tuple[str, Any]] = [("", payload)]
+    while stack:
+        prefix, node = stack.pop()
+        if isinstance(node, dict):
+            for key, value in node.items():
+                path = f"{prefix}.{key}" if prefix else str(key)
+                yield path, str(key), value
+                if isinstance(value, (dict, list)):
+                    stack.append((path, value))
+        elif isinstance(node, list):
+            for position, value in enumerate(node):
+                path = f"{prefix}[{position}]"
+                if isinstance(value, (dict, list)):
+                    stack.append((path, value))
+                else:
+                    yield path, "", value
+
+
+def _is_sensitive_key(key: str) -> bool:
+    lowered = key.lower()
+    if lowered in _SENSITIVE_KEYS:
+        return True
+    normalized = _NOT_ALNUM.sub("", lowered)
+    return any(term in normalized for term in _SENSITIVE_PARTS)
+
+
+def _has_cpf(value: str) -> bool:
+    return any(_cpf_digits_ok(_NOT_DIGIT.sub("", m.group())) for m in _CPF.finditer(value))
+
+
+def _cpf_digits_ok(digits: str) -> bool:
+    """Confere os dois dígitos verificadores do CPF (módulo 11)."""
+    if len(digits) != 11 or digits == digits[0] * 11:
         return False
-    try:
-        header = json.loads(b64url_decode(parts[0]))
-    except (JWTError, json.JSONDecodeError, UnicodeDecodeError):
-        return False
-    return isinstance(header, dict) and "alg" in header
+    for size in (9, 10):
+        total = sum(int(d) * (size + 1 - i) for i, d in enumerate(digits[:size]))
+        if (total * 10) % 11 % 10 != int(digits[size]):
+            return False
+    return True
 
 
 def _as_epoch(value: Any) -> int | None:

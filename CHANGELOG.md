@@ -5,8 +5,78 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
 
 ## [Não lançado]
 
+### Corrigido
+
+- **Token hostil não derruba mais o lote** (`batch`): um JWT com payload
+  profundamente aninhado levantava `RecursionError` (`json.loads`/`json.dumps`
+  são recursivos), abortava o lote inteiro e apagava a auditoria dos demais —
+  quebrando o contrato documentado de isolamento por token. Agora `decode`
+  aplica um **teto explícito de aninhamento** (64 níveis, medido sem recursão
+  sobre os bytes), o que protege decodificação, render e serialização de uma vez;
+  `audit_batch` isola **qualquer** exceção por token (não só `JWTError`),
+  registrando o tipo no campo `error`. Nenhum JWT legítimo passa de poucos níveis.
+- **base64url estrito** (RFC 7515 §2): `b64url_decode` rejeita segmentos com
+  caractere fora do alfabeto `A-Za-z0-9-_`, com espaço/quebra de linha, ou em
+  base64 padrão (`+/`). O decodificador era tolerante (herdado do
+  `urlsafe_b64decode`, que descarta bytes inválidos em silêncio) — um auditor
+  leniente laudava um token que verificador estrito nenhum aceita.
+- **`exp`/`nbf` não-numérico agora falha fechado**: a referência de validação e
+  o detector passivo tratavam uma claim temporal presente-mas-não-numérica
+  (`exp: "1"`, `Infinity`) como **ausente** — um token com `exp` em string nunca
+  expirava. A referência passa a **rejeitar** (RFC 7519 §2: NumericDate é número)
+  e o detector emite o novo achado `claim-malformed-time` (Média).
+- **`claim-long-lifetime` dispara sem `iat`**: um token de 10 anos sem `iat`
+  (mais perigoso, não menos) escapava porque a checagem exigia `exp` **e** `iat`.
+  Sem `iat`, a vida útil passa a ser aproximada por `exp - agora`.
+- **`payload-sensitive` varre em profundidade**: segredo/PII em objeto aninhado
+  (`{"user": {"cpf": …}}` — a forma mais comum de payload JWT no Brasil) escapava
+  porque o loop só olhava o primeiro nível. Agora percorre dicts/listas aninhados
+  (sem recursão), casa chaves compostas (`user_password`, `db_secret`) e detecta
+  **CPF de 11 dígitos crus** (com validação dos dígitos verificadores, para não
+  gerar falso positivo em telefone/id).
+- **JWT aninhado real** (RFC 7519 §5.2): apresentar um JWS-in-JWS legítimo
+  (payload da casca = outro JWS compacto) fazia o `decode` abortar com "payload
+  não é JSON" — a auditoria inteira parava no exato vetor que a ferramenta diz
+  cobrir. Agora a casca é decodificada, o token interno fica em `token.nested` e
+  `payload-nested-jwt` é emitido.
+- **Injeção de marcação do Rich no relatório**: dado controlado pelo emissor do
+  token (`alg`, `kid`, claims, mensagem de erro) contendo `[/]`/`[bold]` derrubava
+  o console com `MarkupError` **ou** — pior — saía interpretado (cor/hyperlink
+  forjados no laudo). Todo campo externo passa por `Text`, saindo literal.
+- Removido arquivo de resíduo versionado por engano na raiz do repositório.
+
+### Mudado
+
+- **Contrato JSON alinhado à suíte** (`schema: "suite-appsec/1"`): identificador
+  do achado em **`id`** (era `check`), `severity_rank` para ordenar entre
+  ferramentas sem tabela de-para, `by_severity` sempre com as **5 chaves**
+  (inclusive zeradas) e `owasp_edition` como campo próprio. **Quebra** quem
+  consumia a chave `check`.
+- **OWASP Top 10 migrado para a edição 2025** (vigente): o ano vai no cabeçalho
+  da coluna (`OWASP 2025 / CWE`) e no JSON; os códigos passam a
+  `A02→A04` (Cryptographic Failures), `A03→A05` (Injection), `A10→A01`
+  (SSRF absorvido em Broken Access Control). Antes o dado não estava errado, mas
+  incoerente com o resto da suíte.
+- **`batch`: código de saída depende só de `--fail-on`.** Linha malformada é
+  ruído normal de token colhido de log — a contagem vai para o stderr e não
+  derruba mais o build (era exit 2). O `2` fica reservado a erro de uso. Novo
+  `--strict` para quem quiser travar em entrada malformada.
+- `--fail-on` passa a aceitar `info`.
+- Subcomando `rules` renomeado para **`regras`** (`rules` continua como alias).
+
 ### Adicionado
 
+- **Aviso de autorização em tempo de execução** nos comandos ofensivos (`crack`,
+  `forge`, `forge-confusion`): imprimem o enquadramento legal (Lei 12.737/2012 c/
+  14.155/2021) no stderr antes de agir.
+- `--wordlist` do `crack` é lida **em streaming** (linha a linha): consumo de
+  memória O(1) e o primeiro acerto encerra a leitura, em vez de materializar a
+  lista inteira (rockyou ~140 MB carregava centenas de MB antes do 1º palpite).
+- Portão de cobertura no CI (`--cov-fail-under=90`), `dependabot.yml` e actions
+  do CI fixadas por SHA.
+- **Meta-teste de catálogo**: toda checagem do `CATALOG` passa a exigir um caso
+  positivo (e casos negativos que matam a inversão silenciosa de um detector) —
+  uma checagem nova nasce vermelha até ter teste.
 - **Detecção de JWT confusion por aninhamento** (checagem passiva, sem rede):
   `header-cty-nested` sinaliza quando o cabeçalho declara `cty: JWT` (comparação
   case-insensitive e com o prefixo `application/` opcional — RFC 7515 §4.1.10 /

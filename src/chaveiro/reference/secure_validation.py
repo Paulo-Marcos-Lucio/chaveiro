@@ -14,6 +14,7 @@ de destinatário. Use-a como espelho ao revisar o código de um cliente.
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Any
 
@@ -80,12 +81,30 @@ def validate(
 
 
 def _check_time(payload: dict[str, Any], now: int, leeway: int) -> None:
-    exp = payload.get("exp")
-    if isinstance(exp, (int, float)) and now > exp + leeway:
+    """Confere 'exp'/'nbf' — e **rejeita** claim temporal malformada.
+
+    RFC 7519 §2 define NumericDate como número. Uma claim presente mas não
+    numérica (``exp: "1"``) tem que ser erro, nunca ausência: tratá-la como
+    ausente é falhar aberto, e um token com ``exp`` em string passaria a nunca
+    expirar. ``bool`` é `int` em Python e também não é NumericDate.
+    """
+    exp = _numeric_date(payload, "exp")
+    if exp is not None and now > exp + leeway:
         raise InvalidToken("token expirado (exp)")
-    nbf = payload.get("nbf")
-    if isinstance(nbf, (int, float)) and now + leeway < nbf:
+    nbf = _numeric_date(payload, "nbf")
+    if nbf is not None and now + leeway < nbf:
         raise InvalidToken("token ainda não válido (nbf)")
+
+
+def _numeric_date(payload: dict[str, Any], claim: str) -> float | None:
+    if claim not in payload:
+        return None
+    value = payload[claim]
+    # `json.loads` aceita os literais Infinity/NaN: com eles, toda comparação
+    # temporal daria False e o token nunca expiraria.
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise InvalidToken(f"claim {claim!r} presente mas não é um NumericDate (RFC 7519 §2)")
+    return float(value)
 
 
 def _check_audience(payload: dict[str, Any], audience: str | None) -> None:

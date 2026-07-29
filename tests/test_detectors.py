@@ -1,15 +1,131 @@
 from __future__ import annotations
 
+import pytest
+
+from chaveiro.checks.catalog import CATALOG
 from chaveiro.checks.detectors import run_all
 from chaveiro.core.jwt import decode
 from chaveiro.core.models import Severity
 from tests.conftest import hs_token, raw_token
 
 NOW = 1_800_000_000
+_INNER_JWT = hs_token({"sub": "admin"}, secret="k")
 
 
 def _ids(token: str, now: int = NOW) -> set[str]:
     return {f.check_id for f in run_all(decode(token), now)}
+
+
+# --------------------------------------------------------------------------- #
+# Cobertura por ID: para CADA checagem do catálogo, um caso que a dispara.
+# Fecha a família de "detector invertido/apagado sem quebrar teste": matar
+# qualquer ramo de check_* apaga o id da lista e o `parametrize` fica vermelho.
+# --------------------------------------------------------------------------- #
+
+_CASOS_POSITIVOS: list[tuple[str, dict, dict]] = [
+    ("alg-none", {"alg": "none"}, {"sub": "a"}),
+    ("alg-missing", {"typ": "JWT"}, {"sub": "a"}),
+    ("alg-unknown", {"alg": "ZZ999"}, {"sub": "a"}),
+    ("alg-hmac-advisory", {"alg": "HS256"}, {"sub": "a"}),
+    ("header-jku", {"alg": "HS256", "jku": "http://evil/keys"}, {"sub": "a"}),
+    ("header-x5u", {"alg": "HS256", "x5u": "http://evil/cert"}, {"sub": "a"}),
+    ("header-jwk", {"alg": "HS256", "jwk": {"kty": "oct"}}, {"sub": "a"}),
+    ("header-x5c", {"alg": "HS256", "x5c": ["MIIB..."]}, {"sub": "a"}),
+    ("header-crit", {"alg": "HS256", "crit": ["exp"]}, {"sub": "a"}),
+    ("header-kid-injection", {"alg": "HS256", "kid": "../../etc/passwd"}, {"sub": "a"}),
+    ("header-cty-nested", {"alg": "HS256", "cty": "JWT"}, {"sub": "a"}),
+    ("claim-no-exp", {"alg": "HS256"}, {"iat": NOW, "aud": "x", "iss": "y"}),
+    ("claim-expired", {"alg": "HS256"}, {"exp": NOW - 10, "iat": NOW - 70}),
+    ("claim-long-lifetime", {"alg": "HS256"}, {"iat": NOW, "exp": NOW + 90 * 24 * 3600}),
+    ("claim-no-iat", {"alg": "HS256"}, {"exp": NOW + 60, "aud": "x", "iss": "y"}),
+    ("claim-no-aud", {"alg": "HS256"}, {"exp": NOW + 60, "iat": NOW, "iss": "y"}),
+    ("claim-no-iss", {"alg": "HS256"}, {"exp": NOW + 60, "iat": NOW, "aud": "x"}),
+    ("claim-malformed-time", {"alg": "HS256"}, {"exp": "1", "iat": NOW}),
+    ("claim-nbf-future", {"alg": "HS256"}, {"nbf": NOW + 3600, "exp": NOW + 7200}),
+    ("payload-nested-jwt", {"alg": "HS256"}, {"assertion": _INNER_JWT}),
+    ("payload-sensitive", {"alg": "HS256"}, {"password": "hunter2"}),
+]
+
+
+@pytest.mark.parametrize(
+    "check_id, header, payload", _CASOS_POSITIVOS, ids=[c[0] for c in _CASOS_POSITIVOS]
+)
+def test_cada_checagem_dispara(check_id: str, header: dict, payload: dict) -> None:
+    assert check_id in _ids(raw_token(header, payload))
+
+
+def test_toda_checagem_do_catalogo_tem_caso_positivo() -> None:
+    """Meta-teste: nenhum ID do catálogo pode nascer sem um caso que o exercite.
+
+    Transforma disciplina humana em invariante — uma checagem nova entra
+    vermelha até ganhar sua tupla em `_CASOS_POSITIVOS`.
+    """
+    testados = {cid for cid, _, _ in _CASOS_POSITIVOS}
+    assert set(CATALOG) - testados == set()
+
+
+# --------------------------------------------------------------------------- #
+# Casos NEGATIVOS: o par que mata a inversão silenciosa de um detector.
+# Ex.: `nbf > now` invertido para `nbf < now` sobrevive a qualquer teste que só
+# olhe o caso positivo — o negativo é o que fica vermelho.
+# --------------------------------------------------------------------------- #
+
+_CASOS_NEGATIVOS: list[tuple[str, dict, dict]] = [
+    # nbf no passado é o token saudável normal — não pode disparar nbf-future.
+    ("claim-nbf-future", {"alg": "HS256"}, {"nbf": NOW - 3600, "exp": NOW + 60}),
+    # exp no futuro não é "expirado".
+    ("claim-expired", {"alg": "HS256"}, {"exp": NOW + 3600, "iat": NOW}),
+    # exp presente e numérico não é "sem exp".
+    ("claim-no-exp", {"alg": "HS256"}, {"exp": NOW + 60}),
+    # exp/iat numéricos não são claim temporal malformada.
+    ("claim-malformed-time", {"alg": "HS256"}, {"exp": NOW + 60, "iat": NOW}),
+    # alg conhecido não é alg desconhecido.
+    ("alg-unknown", {"alg": "RS256"}, {"sub": "a"}),
+    # kid opaco e rotacionado não é injeção.
+    ("header-kid-injection", {"alg": "HS256", "kid": "chave-2024-rotacionada"}, {"sub": "a"}),
+    # vida curta não é vida longa.
+    ("claim-long-lifetime", {"alg": "HS256"}, {"iat": NOW, "exp": NOW + 300}),
+]
+
+
+@pytest.mark.parametrize(
+    "check_id, header, payload", _CASOS_NEGATIVOS, ids=[f"nao-{c[0]}" for c in _CASOS_NEGATIVOS]
+)
+def test_caso_negativo_nao_dispara(check_id: str, header: dict, payload: dict) -> None:
+    assert check_id not in _ids(raw_token(header, payload))
+
+
+# --------------------------------------------------------------------------- #
+# kid: os vetores de injeção (aspas/backtick/pipe/SQL), não só o path traversal.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "kid",
+    [
+        "../../etc/passwd",
+        "chave1'; DROP TABLE users--",
+        'x"y',
+        "chave1`id`",
+        "chave|nc evil 1234",
+        "a;b",
+        "$(whoami)",
+        "a<b",
+        "linha1\nlinha2",
+    ],
+)
+def test_kid_caracteres_perigosos_disparam(kid: str) -> None:
+    ids = _ids(raw_token({"alg": "HS256", "kid": kid}, {"sub": "a"}))
+    assert "header-kid-injection" in ids
+
+
+def test_alg_none_case_insensitive() -> None:
+    # Várias libs aceitam 'None'/'NONE' como não-assinado — o guard usa .lower().
+    for variante in ("None", "NONE", "nOnE"):
+        findings = run_all(decode(raw_token({"alg": variante}, {"sub": "a"})), NOW)
+        assert any(
+            f.check_id == "alg-none" and f.severity is Severity.CRITICAL for f in findings
+        ), variante
 
 
 def test_alg_none_is_critical() -> None:
@@ -30,6 +146,13 @@ def test_expired_token() -> None:
 
 def test_long_lifetime() -> None:
     token = hs_token({"iat": NOW, "exp": NOW + 90 * 24 * 3600, "aud": "x", "iss": "y"})
+    assert "claim-long-lifetime" in _ids(token)
+
+
+def test_long_lifetime_sem_iat_ainda_dispara() -> None:
+    # Token de 10 anos SEM iat é MAIS perigoso — e era justo aí que a checagem se
+    # desligava (exigia iat). A vida útil passa a ser aproximada por 'agora'.
+    token = raw_token({"alg": "HS256"}, {"exp": NOW + 10 * 365 * 24 * 3600, "aud": "x", "iss": "y"})
     assert "claim-long-lifetime" in _ids(token)
 
 

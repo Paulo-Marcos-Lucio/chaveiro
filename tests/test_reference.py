@@ -40,6 +40,28 @@ def test_rejects_expired() -> None:
         validate(token, key=SECRET, algorithms=["HS256"], now=NOW)
 
 
+def test_rejects_exp_as_string_fail_closed() -> None:
+    # RFC 7519 §2: NumericDate é numérico. exp="9999999999" (string) NÃO pode ser
+    # tratado como ausente — senão o token com exp em string nunca expira.
+    token = hs_token({"exp": "9999999999", "iat": NOW}, secret=SECRET.decode())
+    with pytest.raises(InvalidToken):
+        validate(token, key=SECRET, algorithms=["HS256"], now=NOW)
+
+
+def test_rejects_nbf_as_string_fail_closed() -> None:
+    token = hs_token({"nbf": "9999999999", "exp": NOW + 60}, secret=SECRET.decode())
+    with pytest.raises(InvalidToken):
+        validate(token, key=SECRET, algorithms=["HS256"], now=NOW)
+
+
+def test_rejects_exp_infinity() -> None:
+    # json.dumps/loads aceitam o literal Infinity; com ele toda comparação
+    # temporal daria False e o token nunca expiraria. Fail-closed.
+    signed = hs_token({"exp": float("inf"), "iat": NOW}, secret=SECRET.decode())
+    with pytest.raises(InvalidToken):
+        validate(signed, key=SECRET, algorithms=["HS256"], now=NOW)
+
+
 def test_rejects_wrong_audience() -> None:
     with pytest.raises(InvalidToken):
         validate(_good_hs(), key=SECRET, algorithms=["HS256"], audience="outra", now=NOW)

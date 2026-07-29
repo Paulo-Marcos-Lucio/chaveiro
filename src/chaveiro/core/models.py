@@ -37,6 +37,10 @@ class DecodedToken:
     payload: dict[str, Any]
     signature: bytes
     signing_input: bytes  # header_b64 + "." + payload_b64 (bytes ASCII)
+    # JWT aninhado (RFC 7519 §5.2): o token interno, quando o payload da casca é
+    # outro JWS compacto em vez de um objeto JSON. Nesse caso `payload` fica
+    # vazio — a casca não tem claims próprias.
+    nested: str | None = None
 
     @property
     def alg(self) -> str:

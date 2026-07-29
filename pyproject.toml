@@ -72,4 +72,6 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# Portão de cobertura no valor medido, arredondado para baixo (94% hoje). É
+# anti-regressão, não aspiração: um detector novo sem teste derruba o CI.
+addopts = "-q --cov=chaveiro --cov-report=term-missing --cov-fail-under=90"

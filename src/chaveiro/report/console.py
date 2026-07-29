@@ -1,4 +1,11 @@
-"""Renderizador para terminal."""
+"""Renderizador para terminal.
+
+Regra deste módulo: **todo dado que vem do token é `Text`**, nunca string
+interpolada. O rich interpreta `[...]` como marcação, e claim, `alg`, `kid` e
+mensagem de erro são 100% controlados por quem emitiu o token — um `[/]` numa
+claim derrubava o relatório inteiro com `MarkupError`, e um `[green]` fazia o
+laudo mentir na cor certa.
+"""
 
 from __future__ import annotations
 
@@ -11,16 +18,27 @@ from rich.table import Table
 from rich.text import Text
 
 from chaveiro.audit import TokenOutcome, summarize
+from chaveiro.checks.catalog import OWASP_EDITION
 from chaveiro.core.models import AuditResult, DecodedToken, Finding, Severity
 
 _STYLE: dict[Severity, str] = {
     Severity.CRITICAL: "bold white on red",
     Severity.HIGH: "bold red",
-    Severity.MEDIUM: "yellow",
+    Severity.MEDIUM: "bold yellow",
     Severity.LOW: "cyan",
     Severity.INFO: "dim",
 }
+# O identificador em inglês fica no JSON; o rótulo que o cliente lê é PT-BR,
+# como no resto da suíte.
+_LABEL: dict[Severity, str] = {
+    Severity.CRITICAL: "CRÍTICA",
+    Severity.HIGH: "ALTA",
+    Severity.MEDIUM: "MÉDIA",
+    Severity.LOW: "BAIXA",
+    Severity.INFO: "INFO",
+}
 _TIME_CLAIMS = ("exp", "iat", "nbf")
+_TOP_PRIORITIES = 3
 
 
 def render(result: AuditResult, console: Console | None = None) -> None:
@@ -34,30 +52,53 @@ def render(result: AuditResult, console: Console | None = None) -> None:
     table.add_column("Sev", no_wrap=True)
     table.add_column("Checagem", no_wrap=True)
     table.add_column("Detalhe", overflow="fold")
-    table.add_column("OWASP/CWE", no_wrap=True)
+    table.add_column(f"OWASP {OWASP_EDITION} / CWE", no_wrap=True)
     for finding in findings:
         table.add_row(
-            Text(finding.severity.value.upper(), style=_STYLE[finding.severity]),
-            finding.check_id,
-            finding.detail,
-            f"{_short_owasp(finding)} · {finding.cwe or '—'}",
+            Text(_LABEL[finding.severity], style=_STYLE[finding.severity]),
+            Text(finding.check_id),
+            Text(finding.detail),
+            Text(f"{_short_owasp(finding)} · {finding.cwe or '—'}"),
         )
     console.print(table)
+    _render_action_plan(findings, console)
+
+
+def _render_action_plan(findings: list[Finding], console: Console) -> None:
+    """O que fazer com os piores achados — a recomendação já existe, mostre-a."""
+    body = Text()
+    for position, finding in enumerate(findings[:_TOP_PRIORITIES]):
+        if position:
+            body.append("\n\n")
+        body.append(f"{position + 1}. ", style="bold")
+        body.append(_LABEL[finding.severity], style=_STYLE[finding.severity])
+        body.append(f" · {finding.check_id}\n   → ")
+        body.append(finding.recommendation)
+    console.print(Panel(body, title="Plano de ação — comece por aqui", border_style="green"))
 
 
 def _render_token(result: AuditResult, console: Console) -> None:
-    header = json.dumps(result.token.header, indent=2, ensure_ascii=False)
-    claims = _claims_with_readable_times(result)
+    body = Text.assemble(
+        ("header\n", "bold cyan"),
+        json.dumps(result.token.header, indent=2, ensure_ascii=False),
+        ("\n\nclaims\n", "bold cyan"),
+        _claims_with_readable_times(result),
+    )
     console.print(
         Panel(
-            f"[bold cyan]header[/]\n{header}\n\n[bold cyan]claims[/]\n{claims}",
-            title=f"Token · alg={result.token.alg or '—'}",
+            body,
+            title=Text.assemble("Token · alg=", (result.token.alg or "—", "bold")),
             border_style="cyan",
         )
     )
 
 
 def _claims_with_readable_times(result: AuditResult) -> str:
+    if result.token.nested is not None:
+        return (
+            "<JWT aninhado: o payload desta casca é outro JWS compacto>\n"
+            "Audite o token interno separadamente: chaveiro inspect <token-interno>"
+        )
     payload = dict(result.token.payload)
     notes = []
     for claim in _TIME_CLAIMS:
@@ -104,7 +145,7 @@ def render_batch(outcomes: list[TokenOutcome], console: Console | None = None) -
             token_desc = Text(_describe(outcome.result.token))
             top = outcome.result.max_severity()
             severity = (
-                Text(top.value.upper(), style=_STYLE[top])
+                Text(_LABEL[top], style=_STYLE[top])
                 if top is not None
                 else Text("ok", style="green")
             )
@@ -118,11 +159,11 @@ def _render_batch_summary(outcomes: list[TokenOutcome], console: Console) -> Non
     summary = summarize(outcomes)
     worst = summary.max_severity
     worst_text = (
-        Text(worst.value.upper(), style=_STYLE[worst])
+        Text(_LABEL[worst], style=_STYLE[worst])
         if worst is not None
         else Text("nenhuma", style="green")
     )
-    parts = [f"{sev}={n}" for sev, n in sorted(summary.by_severity.items())]
+    parts = [f"{sev}={n}" for sev, n in sorted(summary.by_severity.items()) if n]
     breakdown = ("  ·  " + "  ".join(parts)) if parts else ""
     body = Text.assemble(
         f"tokens={summary.tokens}  auditados={summary.audited}  erros={summary.errors}  pior=",

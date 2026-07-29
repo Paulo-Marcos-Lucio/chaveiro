@@ -10,6 +10,11 @@ from dataclasses import dataclass
 
 from chaveiro.core.models import Finding, Severity
 
+# Edição do OWASP Top 10 usada nos rótulos deste catálogo. Fica explícita no
+# JSON e no cabeçalho das tabelas porque o mesmo código muda de significado
+# entre edições ('A03' é Injection em 2021 e Software Supply Chain em 2025).
+OWASP_EDITION = "2025"
+
 
 @dataclass(frozen=True)
 class CheckMeta:
@@ -29,7 +34,7 @@ CATALOG: dict[str, CheckMeta] = {
             "Token não assinado (alg: none)",
             Severity.CRITICAL,
             "Rejeite explicitamente 'none'. Use uma allowlist fixa de algoritmos na verificação.",
-            "A07:2021 Identification and Authentication Failures",
+            "A07:2025 Authentication Failures",
             "CWE-347",
         ),
         CheckMeta(
@@ -37,7 +42,7 @@ CATALOG: dict[str, CheckMeta] = {
             "Cabeçalho sem 'alg'",
             Severity.HIGH,
             "Sem 'alg' a verificação fica ambígua. Fixe o algoritmo esperado no servidor.",
-            "A07:2021 Identification and Authentication Failures",
+            "A07:2025 Authentication Failures",
             "CWE-347",
         ),
         CheckMeta(
@@ -45,7 +50,7 @@ CATALOG: dict[str, CheckMeta] = {
             "Algoritmo incomum/não reconhecido",
             Severity.MEDIUM,
             "Aceite apenas os algoritmos que você realmente usa (allowlist).",
-            "A07:2021 Identification and Authentication Failures",
+            "A07:2025 Authentication Failures",
             "CWE-347",
         ),
         CheckMeta(
@@ -54,7 +59,7 @@ CATALOG: dict[str, CheckMeta] = {
             Severity.LOW,
             "Rode `chaveiro crack` para testar segredo fraco. Se o servidor também aceita RS*/ES*, "
             "há risco de confusão de algoritmo (RS→HS) — separe as chaves e fixe o algoritmo.",
-            "A02:2021 Cryptographic Failures",
+            "A04:2025 Cryptographic Failures",
             "CWE-326",
         ),
         CheckMeta(
@@ -62,7 +67,7 @@ CATALOG: dict[str, CheckMeta] = {
             "Sem expiração (claim 'exp' ausente)",
             Severity.HIGH,
             "Emita tokens de vida curta com 'exp'. Sem isso, um token vazado é válido para sempre.",
-            "A07:2021 Identification and Authentication Failures",
+            "A07:2025 Authentication Failures",
             "CWE-613",
         ),
         CheckMeta(
@@ -78,7 +83,7 @@ CATALOG: dict[str, CheckMeta] = {
             "Vida útil longa",
             Severity.MEDIUM,
             "Reduza a validade (minutos/horas). Use refresh tokens em vez de access tokens longevos.",
-            "A07:2021 Identification and Authentication Failures",
+            "A07:2025 Authentication Failures",
             "CWE-613",
         ),
         CheckMeta(
@@ -86,7 +91,7 @@ CATALOG: dict[str, CheckMeta] = {
             "Sem 'iat' (issued-at)",
             Severity.LOW,
             "Inclua 'iat' para permitir políticas de idade e auditoria.",
-            "A07:2021 Identification and Authentication Failures",
+            "A07:2025 Authentication Failures",
             None,
         ),
         CheckMeta(
@@ -94,7 +99,7 @@ CATALOG: dict[str, CheckMeta] = {
             "Sem 'aud' (audience)",
             Severity.LOW,
             "Valide 'aud' no servidor para impedir reúso do token em outro serviço.",
-            "A07:2021 Identification and Authentication Failures",
+            "A07:2025 Authentication Failures",
             "CWE-345",
         ),
         CheckMeta(
@@ -102,8 +107,18 @@ CATALOG: dict[str, CheckMeta] = {
             "Sem 'iss' (issuer)",
             Severity.LOW,
             "Inclua e valide 'iss' para amarrar o token ao emissor esperado.",
-            "A07:2021 Identification and Authentication Failures",
+            "A07:2025 Authentication Failures",
             "CWE-345",
+        ),
+        CheckMeta(
+            "claim-malformed-time",
+            "Claim temporal presente mas não numérica",
+            Severity.MEDIUM,
+            "RFC 7519 §2 define exp/nbf/iat como NumericDate (número de segundos). Uma claim "
+            "temporal em string ou objeto faz muito verificador pular a checagem em silêncio "
+            "(fail-open) — o token deixa de expirar. Emita NumericDate e rejeite o que não for.",
+            "A07:2025 Authentication Failures",
+            "CWE-613",
         ),
         CheckMeta(
             "claim-nbf-future",
@@ -119,7 +134,7 @@ CATALOG: dict[str, CheckMeta] = {
             Severity.HIGH,
             "Nunca busque a chave de uma URL vinda do token — vetor de SSRF e injeção de chave. "
             "Use uma allowlist local de chaves confiáveis.",
-            "A10:2021 Server-Side Request Forgery",
+            "A01:2025 Broken Access Control",
             "CWE-918",
         ),
         CheckMeta(
@@ -127,7 +142,7 @@ CATALOG: dict[str, CheckMeta] = {
             "Cabeçalho 'x5u' (URL de certificado)",
             Severity.HIGH,
             "Idem 'jku': não carregue material de chave de URL controlável pelo emissor do token.",
-            "A10:2021 Server-Side Request Forgery",
+            "A01:2025 Broken Access Control",
             "CWE-918",
         ),
         CheckMeta(
@@ -136,7 +151,7 @@ CATALOG: dict[str, CheckMeta] = {
             Severity.HIGH,
             "Chave pública embutida no token: um atacante fornece a própria chave. Ignore 'jwk' e "
             "use apenas chaves configuradas no servidor.",
-            "A07:2021 Identification and Authentication Failures",
+            "A07:2025 Authentication Failures",
             "CWE-347",
         ),
         CheckMeta(
@@ -144,7 +159,7 @@ CATALOG: dict[str, CheckMeta] = {
             "Cabeçalho 'x5c' (cadeia de certificados embutida)",
             Severity.MEDIUM,
             "Só confie em 'x5c' se validar a cadeia contra uma âncora confiável sua.",
-            "A07:2021 Identification and Authentication Failures",
+            "A07:2025 Authentication Failures",
             "CWE-347",
         ),
         CheckMeta(
@@ -153,7 +168,7 @@ CATALOG: dict[str, CheckMeta] = {
             Severity.HIGH,
             "Trate 'kid' como identificador opaco. Nunca o use em caminho de arquivo ou SQL — "
             "é vetor de path traversal / injeção.",
-            "A03:2021 Injection",
+            "A05:2025 Injection",
             "CWE-91",
         ),
         CheckMeta(
@@ -171,7 +186,7 @@ CATALOG: dict[str, CheckMeta] = {
             "JWT aninhado (RFC 7519 §5.2): o payload da casca deveria ser outro JWT. Verifique a "
             "assinatura das DUAS camadas, com allowlist de algoritmos em cada uma; nunca confie no "
             "token interno sem validá-lo (assinatura, alg, exp, aud/iss).",
-            "A07:2021 Identification and Authentication Failures",
+            "A07:2025 Authentication Failures",
             "CWE-347",
         ),
         CheckMeta(
@@ -180,7 +195,7 @@ CATALOG: dict[str, CheckMeta] = {
             Severity.LOW,
             "Uma claim carrega o que parece ser outro JWT. Se um token embute outro, valide o token "
             "interno com o mesmo rigor da casca antes de confiar nele — não o repasse como confiável.",
-            "A07:2021 Identification and Authentication Failures",
+            "A07:2025 Authentication Failures",
             "CWE-347",
         ),
         CheckMeta(
@@ -189,7 +204,7 @@ CATALOG: dict[str, CheckMeta] = {
             Severity.MEDIUM,
             "O payload de um JWT é apenas base64 — não é cifrado. Não coloque segredos nem dados "
             "pessoais (LGPD) nele; use JWE se precisar de confidencialidade.",
-            "A02:2021 Cryptographic Failures",
+            "A04:2025 Cryptographic Failures",
             "CWE-522",
         ),
     ]
