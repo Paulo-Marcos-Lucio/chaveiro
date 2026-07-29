@@ -1,4 +1,4 @@
-<a href="https://paulo-marcos-lucio.github.io"><img src="https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/banner-abismo.svg" alt="Chaveiro — as chaves que flutuam no escuro: auditor de segurança de tokens JWT/JWS" width="100%"/></a>
+<a href="https://paulo-marcos-lucio.github.io"><img src="https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/banner-abismo-v2.svg" alt="Chaveiro — as chaves que flutuam no escuro: auditor de segurança de tokens JWT/JWS" width="100%"/></a>
 
 <div align="center">
 
