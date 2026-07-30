@@ -141,17 +141,20 @@ O que torna essa função segura está documentado nela mesma — é o material 
 
 ---
 
-## 🔓 Versão Pro (privada) — auditoria guiada do seu fluxo de auth
+## 🔓 Versão Pro (privada) — o motor é o mesmo, o Pro é trabalho humano
 
-**Para não haver dúvida: o Pro não é um motor diferente.** O detector deste repositório é o mesmo que eu uso no serviço — não existe uma "engine turbinada" escondida atrás de um paywall, nem checagem que só roda na versão paga. O que aqui está público é o que faz o trabalho.
+**Para não haver dúvida: o Pro não é um motor diferente.** O detector deste repositório é o mesmo que roda no serviço — não existe "engine turbinada" escondida atrás de paywall, nem checagem que só nasce na versão paga. O que está público aqui é o que faz o trabalho. A tabela separa o que a **ferramenta** faz (você roda sozinho) do que o **serviço** acrescenta (trabalho humano sobre a mesma engine):
 
-A **versão Pro é serviço humano** sobre essa mesma engine — a **auditoria guiada do seu fluxo de autenticação** (JWT/JWS, OAuth2/OIDC, Open Finance/FAPI), conduzida por quem **construiu** esse tipo de integração:
+| | Ferramenta pública — **você roda** | Pro · serviço — **eu conduzo com você** |
+| --- | --- | --- |
+| **Motor de detecção** | O mesmo — **22/22** vetores, **0** falso-positivo, **24.606 tokens/s** | O **mesmo** motor, apontado para o seu fluxo real de autenticação |
+| **Escopo** | O token que você colar, ou o arquivo/log que você tiver | Emissor **e** verificador do sistema inteiro, mais o histórico de tokens em log |
+| **PoC de exploração** | `crack` / `forge` / `forge-confusion` na sua bancada | PoC **autorizado**, com escopo assinado, rodado no seu ambiente e documentado |
+| **Correção** | Módulo `reference/` documentado — você adapta ao seu código | Validação de referência **implementada e testada no seu stack**, entregue via PR |
+| **Segredo HMAC fraco** | A ferramenta aponta o risco | **Rotação conduzida com reteste** — confirmo que o novo segredo resiste |
+| **Transferência** | README + código-fonte aberto | **Mentoria**: seu time entende o porquê de cada bypass, não só o patch |
 
-- 🔑 Revisão do **emissor e do verificador** do seu sistema (onde a maior parte dos bypasses mora);
-- 🧪 **PoC autorizado** que comprova a falha no seu ambiente, para justificar a correção;
-- 🛡️ A **validação de referência aplicada ao seu stack** — implementada e testada no seu código, não só o módulo documentado que já vem neste repo.
-
-> **Sua autenticação usa JWT?** Vale uma revisão antes que alguém troque o `alg` por você.
+> A engine é a mesma dos dois lados. O que você contrata no Pro é **tempo humano** — de quem construiu emissor e verificador em Open Finance / FAPI — nunca um recurso técnico escondido. Todo PoC é **gated**: só roda em sistema seu ou com autorização explícita por escrito.
 
 <div align="center">
 
@@ -163,6 +166,23 @@ A **versão Pro é serviço humano** sobre essa mesma engine — a **auditoria g
 ---
 
 ## 🏗️ Arquitetura
+
+O Chaveiro resolve uma pergunta específica: *este token seria aceito por um verificador mal configurado?* — e responde antes que um atacante faça a mesma pergunta. O dado percorre um pipeline curto: você passa um token (ou um arquivo/log de tokens), ele é **decodificado sem verificar assinatura**, os detectores varrem cabeçalho, algoritmo, claims e payload, e cada fraqueza vira um `Finding` já classificado por **OWASP 2025 / CWE**. No fim sai um relatório — no **console** (rich) para ler, ou em **JSON** (`schema suite-appsec/1`) para pipeline. A auditoria é **100% passiva**, não toca a rede; os comandos de ataque (`crack`/`forge`) são separados e exigem autorização.
+
+```mermaid
+flowchart LR
+    IN["Token JWT/JWS · ou arquivo/log (batch)"] --> CLI["cli.py — CLI (typer)"]
+    CLI --> AUD["audit.py — orquestração"]
+    AUD --> DEC["core/jwt — decode base64url (não verifica assinatura)"]
+    DEC --> CHK["checks/detectors — alg · header · claims · payload · nested · CPF"]
+    CHK --> CAT["checks/catalog — taxonomia OWASP 2025 / CWE"]
+    CAT --> FND["Finding (imutável)"]
+    FND --> RPT["report/ — renderização"]
+    RPT --> CON["console (rich)"]
+    RPT --> JSN["JSON (schema suite-appsec/1)"]
+    CLI --> ATK["attacks/ — crack · confusion (PoC, autorizado)"]
+    FND -.->|correção de referência| REF["reference/ — validação correta"]
+```
 
 ```
 src/chaveiro/
