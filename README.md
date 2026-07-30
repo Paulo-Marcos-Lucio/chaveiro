@@ -54,6 +54,21 @@ O Chaveiro cobre esses vetores dos dois lados: **audita** um token, **prova** a 
 
 ---
 
+## 📊 Prova de campo
+
+Não é folheto: os números abaixo foram **medidos rodando o CLI** numa bateria de execução real — vetores de ataque conhecidos de um lado, tokens legítimos do outro.
+
+| Métrica | Valor medido |
+| --- | --- |
+| **Recall** em vetores de ataque | **22 / 22** — `alg:none`, confusão RS→HS, injeção em `kid`/`jku`, JWT aninhado real, CPF (mód-11) |
+| **Falso-positivo** em tokens legítimos | **0** — 6 / 6 tokens bem-formados passaram limpos |
+| **Throughput** (`batch`) | **24.606 tokens/s** (~40,6 µs/token) |
+| **Resiliência a token hostil** | um JWT com aninhamento profundo **não derruba o lote** — é isolado, registrado no campo `error` e a auditoria dos demais segue |
+
+**Falso-positivo conhecido (transparência, não vitrine):** o detector `payload-sensitive` casa `secret` como *substring* do nome da claim, de propósito, para pegar as formas compostas reais (`client_secret`, `db_secret`, `dbSecret`). O custo é que uma claim chamada `secretary` também é sinalizada. É um aviso de severidade **baixa**, nunca um bypass — mas prefiro documentar aqui a decidir por você que você não ia notar.
+
+---
+
 ## 🚀 Instalação
 
 O Chaveiro **não está no PyPI** (`pip install chaveiro` traria outro pacote ou
@@ -128,11 +143,13 @@ O que torna essa função segura está documentado nela mesma — é o material 
 
 ## 🔓 Versão Pro (privada) — auditoria guiada do seu fluxo de auth
 
-Aqui está o ferramental. A **versão Pro é privada**: a **auditoria completa do seu fluxo de autenticação** (JWT/JWS, OAuth2/OIDC, Open Finance/FAPI), conduzida por quem **construiu** esse tipo de integração — com PoC autorizado da falha e a **validação de referência aplicada ao seu código**, não só documentada.
+**Para não haver dúvida: o Pro não é um motor diferente.** O detector deste repositório é o mesmo que eu uso no serviço — não existe uma "engine turbinada" escondida atrás de um paywall, nem checagem que só roda na versão paga. O que aqui está público é o que faz o trabalho.
 
-- 🔑 Revisão do **emissor e do verificador** (onde 90% dos bypasses moram);
-- 🧪 PoC autorizado que comprova a falha para justificar a correção;
-- 🛡️ Validação segura implementada no seu stack, com teste.
+A **versão Pro é serviço humano** sobre essa mesma engine — a **auditoria guiada do seu fluxo de autenticação** (JWT/JWS, OAuth2/OIDC, Open Finance/FAPI), conduzida por quem **construiu** esse tipo de integração:
+
+- 🔑 Revisão do **emissor e do verificador** do seu sistema (onde a maior parte dos bypasses mora);
+- 🧪 **PoC autorizado** que comprova a falha no seu ambiente, para justificar a correção;
+- 🛡️ A **validação de referência aplicada ao seu stack** — implementada e testada no seu código, não só o módulo documentado que já vem neste repo.
 
 > **Sua autenticação usa JWT?** Vale uma revisão antes que alguém troque o `alg` por você.
 

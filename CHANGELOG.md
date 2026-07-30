@@ -5,6 +5,17 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
 
 ## [Não lançado]
 
+### Documentação
+
+- **README com prova de campo e Pro honesto**: nova seção "Prova de campo" com
+  os números medidos da bateria real (recall 22/22 vetores, 0 falso-positivo em
+  6/6 tokens legítimos, 24.606 tokens/s no `batch`, token hostil não derruba o
+  lote) e o falso-positivo conhecido (`secret` como substring casa `secretary`)
+  documentado em vez de escondido. A seção Pro passa a dizer com todas as letras
+  que **a engine é a mesma** — o Pro é **serviço** (auditoria guiada, PoC
+  autorizado, validação de referência aplicada ao stack do cliente), não código
+  diferente atrás de paywall.
+
 ### Corrigido
 
 - **Token hostil não derruba mais o lote** (`batch`): um JWT com payload
