@@ -177,6 +177,24 @@ src/chaveiro/
 
 ---
 
+## 🔬 Qualidade de engenharia & método
+
+**Portões (medidos agora, não prometidos):** **126 testes** verdes · cobertura **94%** (o gate trava em `--cov-fail-under=90`) · `mypy --strict` limpo em **18 arquivos** · `ruff` (lint + format) limpo · CI em matriz **Python 3.10 / 3.11 / 3.12**.
+
+**Teste que fica vermelho se a detecção for desfeita.** A suíte não confirma só o caso positivo — guarda a *inversão silenciosa*. Cada detector tem um par negativo (`_CASOS_NEGATIVOS` em `tests/test_detectors.py`): trocar `nbf > agora` por `nbf < agora` passa em qualquer teste que só olhe o positivo, mas deixa o negativo vermelho. E um meta-teste (`test_toda_checagem_do_catalogo_tem_caso_positivo`) reprova o build se uma checagem nova nascer sem caso que a exercite — disciplina humana virou invariante.
+
+**Padrões que estão de fato no código:**
+- **Separação de responsabilidades:** detecção (`checks/detectors.py`, decide *quando* emitir) × taxonomia (`checks/catalog.py`, os metadados) × orquestração (`audit.py`) × renderização (`report/console.py` e `report/json_report.py`).
+- **Fonte única de verdade:** o mapa OWASP 2025 / CWE de cada achado vive só no `CATALOG` de `catalog.py`; a edição do OWASP é constante explícita (`OWASP_EDITION`), porque `A03` muda de significado entre 2021 e 2025.
+- **Contrato de saída versionado:** JSON com `schema: "suite-appsec/1"`, `severity_rank` e `by_severity` sempre com as 5 chaves (inclusive zeradas) — um painel ordena e agrega sem fazer parsing do rótulo.
+- **Tipos estritos e imutabilidade:** os modelos de domínio são `@dataclass(frozen=True)` (`DecodedToken`, `Finding`, `CheckMeta`); `mypy --strict` sobre `src`.
+
+**Cadeia de suprimentos do próprio repo:** as actions do CI são fixadas por **SHA** (não por tag móvel), com o **Dependabot** atualizando esses SHAs mensalmente — `github-actions` e `pip`. Fixar sem Dependabot congelaria a versão vulnerável para sempre; as duas peças só fazem sentido juntas.
+
+**PT-BR em código, teste e doc** é decisão consciente de consistência: o mesmo idioma do relatório que chega ao cliente, sem troca de contexto entre o achado e a recomendação.
+
+---
+
 ## ⚖️ Uso ético
 
 Ferramentas de ataque (`crack`, `forge`, `forge-confusion`) são para **sistemas que você possui ou tem autorização explícita para testar**. O objetivo é defensivo: comprovar a falha para justificar a correção. No Brasil, acesso não autorizado é crime (Lei 12.737/2012, agravada pela Lei 14.155/2021). Use com escopo definido — e esses três comandos **imprimem esse aviso ao rodar**.
