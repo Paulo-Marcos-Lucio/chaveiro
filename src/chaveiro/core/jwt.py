@@ -135,8 +135,18 @@ def parse_json_limited(raw: bytes, what: str) -> Any:
         raise JWTError(f"{what} aninhado demais: {depth} níveis (teto {MAX_JSON_DEPTH})")
     try:
         return json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exc:
-        raise JWTError(f"{what} não é JSON UTF-8 válido") from exc
+    except (ValueError, RecursionError) as exc:
+        # `json.loads` levanta `ValueError` para JSON malformado (JSONDecodeError),
+        # bytes não-UTF-8 (UnicodeDecodeError também é ValueError) **e** — o caso
+        # que escapava — para um inteiro literal além de `sys.get_int_max_str_digits()`
+        # (~4300 dígitos): esse é um `ValueError` **cru**, não um JSONDecodeError, e
+        # antes vazava por cima do `except`, virando traceback no `inspect` e um erro
+        # opaco que engolia o token no `batch`. `RecursionError` cobre o parser
+        # recursivo em JSON patológico. Tudo agora falha ALTO como `JWTError`, que o
+        # chamador já sabe tratar (inspect: exit 2; batch: linha isolada como erro).
+        raise JWTError(
+            f"{what} não é JSON processável (UTF-8 válido, sem inteiro grande demais)"
+        ) from exc
 
 
 def _nesting_depth(raw: bytes) -> int:

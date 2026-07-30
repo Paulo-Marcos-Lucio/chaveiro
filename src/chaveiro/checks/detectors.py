@@ -20,6 +20,11 @@ _KNOWN_ALGS = {
 }  # fmt: skip
 _HMAC_ALGS = {"HS256", "HS384", "HS512"}
 _LONG_LIFETIME_S = 24 * 3600
+# Acima disso um inteiro não cabe em float (`/` estoura ~1.8e308) e o valor já
+# não é um NumericDate plausível. ~31 mil anos em segundos — nenhum token real
+# chega perto; serve só de para-raios do OverflowError.
+_FLOAT_SAFE_SECONDS = 10**12
+_SECONDS_PER_YEAR = 365 * 24 * 3600
 
 _KID_DANGEROUS = ("..", "/", "\\", "'", '"', ";", "`", "$(", "|", "<", ">", "\x00", "\n")
 _TIME_CLAIMS = ("exp", "iat", "nbf")
@@ -30,10 +35,28 @@ _SENSITIVE_KEYS = {
     "secret", "client_secret", "api_key", "apikey",
     "token", "access_token", "refresh_token", "private_key",
 }  # fmt: skip
-# Substring sobre a chave normalizada (minúscula, sem separadores): pega
-# 'user_password', 'dbSecret', 'x-api-key' — as formas compostas reais.
-_SENSITIVE_PARTS = ("password", "passwd", "pwd", "senha", "secret", "apikey", "privatekey")
+# Radicais LONGOS e inequívocos: seguros como substring na chave achatada
+# (minúscula, sem separadores) — nenhuma palavra inocente os contém. Pega
+# 'user_password', 'x-api-key', 'privateKey'.
+_SENSITIVE_PARTS_FLAT = ("password", "passwd", "apikey", "privatekey")
+# Radicais CURTOS/ambíguos: só valem como TOKEN inteiro (fronteira de palavra),
+# senão a substring achatada casa 'secretaria'/'secretary'/'greatsecret'
+# ('secret'), 'resenha'/'desenha'/'senharia' ('senha') e 'pwded' ('pwd').
+# Continuam pegando as formas compostas REAIS ('client_secret', 'dbSecret',
+# 'senha_usuario', 'pwdHash'), porque elas têm fronteira (separador ou camelCase).
+_SENSITIVE_PARTS_TOKEN = ("secret", "senha", "pwd")
 _NOT_ALNUM = re.compile(r"[^a-z0-9]")
+# Fronteiras de palavra dentro de uma chave: separadores e transições de caixa
+# (camelCase) / letra<->dígito. Tokeniza 'dbSecret'->{db,secret},
+# 'senha_usuario'->{senha,usuario}, 'APIKey'->{api,key} — sem quebrar
+# 'secretaria', que continua um token único (e por isso não casa 'secret').
+_KEY_SEP = re.compile(r"[^A-Za-z0-9]+")
+_KEY_BOUNDARY = re.compile(
+    r"(?<=[a-z0-9])(?=[A-Z])"  # minúscula/dígito -> Maiúscula (camelCase)
+    r"|(?<=[A-Z])(?=[A-Z][a-z])"  # fim de acrônimo: 'APIKey' -> 'API' 'Key'
+    r"|(?<=[A-Za-z])(?=[0-9])"  # letra -> dígito
+    r"|(?<=[0-9])(?=[A-Za-z])"  # dígito -> letra
+)
 _NOT_DIGIT = re.compile(r"\D")
 # CPF nas duas formas de campo: pontuada e 11 dígitos crus. Os dígitos
 # verificadores são conferidos depois — sem isso, todo número de 11 dígitos
@@ -57,10 +80,16 @@ def run_all(token: DecodedToken, now: int) -> list[Finding]:
 def check_alg(token: DecodedToken) -> list[Finding]:
     out: list[Finding] = []
     alg = token.header.get("alg")
-    if not isinstance(alg, str) or alg == "":
+    if not isinstance(alg, str) or alg.strip() == "":
         out.append(make_finding("alg-missing", "O cabeçalho não declara 'alg'."))
         return out
-    if alg.lower() == "none":
+    # Espaço/tabulação em volta do valor não muda a intenção: 'none ', '\tNoNe'
+    # e 'HS256 ' são o mesmo algoritmo para um verificador leniente (muitas libs
+    # fazem strip). Comparamos pela forma normalizada — mantendo o valor cru na
+    # evidência — senão 'alg: none ' escaparia do CRÍTICO para o MÉDIO de
+    # alg-unknown. O strip acompanha a leniência de caixa que já existia no none.
+    normalized = alg.strip()
+    if normalized.lower() == "none":
         out.append(
             make_finding(
                 "alg-none",
@@ -70,11 +99,11 @@ def check_alg(token: DecodedToken) -> list[Finding]:
             )
         )
         return out
-    if alg not in _KNOWN_ALGS:
+    if normalized not in _KNOWN_ALGS:
         out.append(
             make_finding("alg-unknown", f"Algoritmo não reconhecido: {alg!r}.", evidence=alg)
         )
-    elif alg in _HMAC_ALGS:
+    elif normalized in _HMAC_ALGS:
         out.append(
             make_finding(
                 "alg-hmac-advisory",
@@ -192,7 +221,7 @@ def check_claims(token: DecodedToken, now: int) -> list[Finding]:
         if lifetime > _LONG_LIFETIME_S:
             out.append(
                 make_finding(
-                    "claim-long-lifetime", f"Validade de ~{round(lifetime / 3600, 1)}h ({base})."
+                    "claim-long-lifetime", f"Validade de {_humanize_seconds(lifetime)} ({base})."
                 )
             )
 
@@ -263,8 +292,24 @@ def _is_sensitive_key(key: str) -> bool:
     lowered = key.lower()
     if lowered in _SENSITIVE_KEYS:
         return True
+    # Radical longo: substring na forma achatada (sem risco de colisão).
     normalized = _NOT_ALNUM.sub("", lowered)
-    return any(term in normalized for term in _SENSITIVE_PARTS)
+    if any(part in normalized for part in _SENSITIVE_PARTS_FLAT):
+        return True
+    # Radical curto/ambíguo: só conta se for uma palavra inteira da chave.
+    tokens = _tokenize_key(key)
+    return any(part in tokens for part in _SENSITIVE_PARTS_TOKEN)
+
+
+def _tokenize_key(key: str) -> set[str]:
+    """Quebra a chave em palavras por separadores + fronteiras camelCase/dígito.
+
+    Assim 'secret' casa 'client_secret'/'dbSecret' (têm fronteira) mas NÃO
+    'secretaria' (palavra única) — o radical curto vira sinal só na fronteira,
+    em vez de um filtro binário que cega tudo.
+    """
+    spaced = _KEY_BOUNDARY.sub(" ", _KEY_SEP.sub(" ", key))
+    return {tok.lower() for tok in spaced.split()}
 
 
 def _has_cpf(value: str) -> bool:
@@ -280,6 +325,23 @@ def _cpf_digits_ok(digits: str) -> bool:
         if (total * 10) % 11 % 10 != int(digits[size]):
             return False
     return True
+
+
+def _humanize_seconds(seconds: int) -> str:
+    """Duração legível que **nunca** estoura float com um inteiro gigante.
+
+    Um ``exp`` absurdo (ex.: ``10**400``) fazia ``seconds / 3600`` levantar
+    ``OverflowError`` ("integer division result too large for a float") e derrubar
+    a auditoria inteira — traceback no ``inspect`` e, no ``batch``, o token era
+    engolido como "malformado" (o achado de validade-longa-demais sumia e o gate
+    passava verde: fail-open). Para valores plausíveis mantemos horas com uma
+    casa; para o gigantesco caímos em anos por divisão **inteira**, preservando o
+    achado. ``str`` do resultado é segura: o decode já rejeita inteiro além do
+    limite de dígitos, então o que chega aqui converte para texto sem levantar.
+    """
+    if -_FLOAT_SAFE_SECONDS < seconds < _FLOAT_SAFE_SECONDS:
+        return f"~{round(seconds / 3600, 1)}h"
+    return f"~{seconds // _SECONDS_PER_YEAR} anos"
 
 
 def _as_epoch(value: Any) -> int | None:

@@ -96,15 +96,23 @@ def _check_time(payload: dict[str, Any], now: int, leeway: int) -> None:
         raise InvalidToken("token ainda não válido (nbf)")
 
 
-def _numeric_date(payload: dict[str, Any], claim: str) -> float | None:
+def _numeric_date(payload: dict[str, Any], claim: str) -> int | float | None:
     if claim not in payload:
         return None
     value = payload[claim]
-    # `json.loads` aceita os literais Infinity/NaN: com eles, toda comparação
-    # temporal daria False e o token nunca expiraria.
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    # RFC 7519 §2: NumericDate é número (bool é int em Python, mas não é data).
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise InvalidToken(f"claim {claim!r} presente mas não é um NumericDate (RFC 7519 §2)")
-    return float(value)
+    # `json.loads` aceita os literais Infinity/NaN: com eles toda comparação
+    # temporal daria False e o token nunca expiraria — a checagem de finitude fica
+    # SÓ no ramo float, porque `math.isfinite`/`float()` estouram (OverflowError)
+    # ao converter um inteiro gigante (ex.: exp = 10**400) para double, e um exp
+    # hostil não pode DERRUBAR o validador de referência. Devolvemos o número CRU,
+    # sem conversão: a comparação em `_check_time` já opera com int de precisão
+    # arbitrária (um exp astronômico é, corretamente, "ainda não expirado").
+    if isinstance(value, float) and not math.isfinite(value):
+        raise InvalidToken(f"claim {claim!r} presente mas não é um NumericDate (RFC 7519 §2)")
+    return value
 
 
 def _check_audience(payload: dict[str, Any], audience: str | None) -> None:
