@@ -133,7 +133,7 @@ def test_exp_inteiro_gigante_nao_derruba_auditoria() -> None:
 def test_inteiro_alem_do_limite_de_digitos_vira_jwterror() -> None:
     big = "1" + "0" * 5000  # 5001 dígitos > limite -> json.loads levanta ValueError cru
     header = b64url_encode(json.dumps({"alg": "HS256"}).encode("utf-8"))
-    payload = b64url_encode(('{"exp":' + big + '}').encode("utf-8"))
+    payload = b64url_encode(('{"exp":' + big + "}").encode("utf-8"))
     hostil = f"{header}.{payload}.AAAA"
     with pytest.raises(JWTError):  # falha ALTO, nunca ValueError cru / traceback
         decode(hostil)

@@ -139,9 +139,7 @@ def test_alg_none_with_surrounding_whitespace_is_critical(alg: str) -> None:
     # Um verificador leniente faz strip e aceita o token não-assinado; 'none '
     # com espaço/tab NÃO pode cair para alg-unknown (MEDIUM). Deve ser CRÍTICO.
     findings = run_all(decode(raw_token({"alg": alg}, {"sub": "a"})), NOW)
-    assert any(
-        f.check_id == "alg-none" and f.severity is Severity.CRITICAL for f in findings
-    ), alg
+    assert any(f.check_id == "alg-none" and f.severity is Severity.CRITICAL for f in findings), alg
     # e nunca a rebaixa como algoritmo "desconhecido"
     assert "alg-unknown" not in {f.check_id for f in findings}
 

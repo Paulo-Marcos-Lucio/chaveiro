@@ -199,7 +199,7 @@ src/chaveiro/
 
 ## 🔬 Qualidade de engenharia & método
 
-**Portões (medidos agora, não prometidos):** **126 testes** verdes · cobertura **94%** (o gate trava em `--cov-fail-under=90`) · `mypy --strict` limpo em **18 arquivos** · `ruff` (lint + format) limpo · CI em matriz **Python 3.10 / 3.11 / 3.12**.
+**Portões (medidos agora, não prometidos):** **168 testes** verdes · cobertura **94%** (o gate trava em `--cov-fail-under=90`) · `mypy --strict` limpo em **18 arquivos** · `ruff` (lint + format) limpo · CI em matriz **Python 3.10 / 3.11 / 3.12**.
 
 **Teste que fica vermelho se a detecção for desfeita.** A suíte não confirma só o caso positivo — guarda a *inversão silenciosa*. Cada detector tem um par negativo (`_CASOS_NEGATIVOS` em `tests/test_detectors.py`): trocar `nbf > agora` por `nbf < agora` passa em qualquer teste que só olhe o positivo, mas deixa o negativo vermelho. E um meta-teste (`test_toda_checagem_do_catalogo_tem_caso_positivo`) reprova o build se uma checagem nova nascer sem caso que a exercite — disciplina humana virou invariante.
 
