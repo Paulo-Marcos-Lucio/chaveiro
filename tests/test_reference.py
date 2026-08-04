@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
+from chaveiro.core.jwt import b64url_encode, sign_hmac
 from chaveiro.reference.secure_validation import InvalidToken, validate
 from tests.conftest import hs_token, raw_token, sign_eddsa, sign_ps256, sign_rs256
 
@@ -145,3 +148,34 @@ def test_eddsa_not_in_allowlist_is_rejected(ed25519_keys: tuple[bytes, bytes]) -
     token = sign_eddsa({"sub": "ed", "exp": NOW + 60, "iat": NOW}, private_pem)
     with pytest.raises(InvalidToken):
         validate(token, key=public_pem, algorithms=["RS256"], now=NOW)
+
+
+def test_valida_typ() -> None:
+    # P2-04: quando o chamador exige um 'typ', a referência tem que conferi-lo —
+    # antes ela ignorava o cabeçalho e aceitava qualquer 'typ' em silêncio.
+    at_jwt = hs_token({"exp": NOW + 60}, secret=SECRET.decode(), typ="at+jwt")
+    # typ conferido e igual: aceita
+    assert validate(at_jwt, key=SECRET, algorithms=["HS256"], now=NOW, typ="at+jwt")
+    # typ conferido e diferente do declarado: rejeita explicitamente
+    with pytest.raises(InvalidToken):
+        validate(at_jwt, key=SECRET, algorithms=["HS256"], now=NOW, typ="JWT")
+    # typ exigido mas ausente no token: rejeita (não trata ausência como ok)
+    header = b64url_encode(json.dumps({"alg": "HS256"}).encode())
+    payload = b64url_encode(json.dumps({"exp": NOW + 60}).encode())
+    sig = sign_hmac(f"{header}.{payload}".encode("ascii"), SECRET, "HS256")
+    sem_typ = f"{header}.{payload}.{b64url_encode(sig)}"
+    with pytest.raises(InvalidToken):
+        validate(sem_typ, key=SECRET, algorithms=["HS256"], now=NOW, typ="JWT")
+
+
+def test_jwt_aninhado_falha_explicitamente() -> None:
+    # P2-04: para um JWT aninhado (cty:JWT, payload = outro JWS) a referência
+    # devolvia {} em silêncio — fail-open que trata "casca sem claims" como token
+    # válido de payload vazio. Agora tem que falhar ALTO.
+    inner = hs_token({"sub": "a", "exp": NOW + 60}, secret="k")
+    header = b64url_encode(json.dumps({"alg": "HS256", "typ": "JWT", "cty": "JWT"}).encode())
+    payload = b64url_encode(inner.encode())
+    sig = sign_hmac(f"{header}.{payload}".encode("ascii"), SECRET, "HS256")
+    outer = f"{header}.{payload}.{b64url_encode(sig)}"
+    with pytest.raises(InvalidToken):
+        validate(outer, key=SECRET, algorithms=["HS256"], now=NOW)
