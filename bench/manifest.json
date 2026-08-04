@@ -1,0 +1,113 @@
+{
+ "now": 1800000000,
+ "positivos": [
+  {
+   "vetor": "alg:none",
+   "esperado": "alg-none"
+  },
+  {
+   "vetor": "alg ausente",
+   "esperado": "alg-missing"
+  },
+  {
+   "vetor": "alg desconhecido",
+   "esperado": "alg-unknown"
+  },
+  {
+   "vetor": "jku (SSRF)",
+   "esperado": "header-jku"
+  },
+  {
+   "vetor": "x5u (SSRF)",
+   "esperado": "header-x5u"
+  },
+  {
+   "vetor": "jwk embutida",
+   "esperado": "header-jwk"
+  },
+  {
+   "vetor": "x5c embutida",
+   "esperado": "header-x5c"
+  },
+  {
+   "vetor": "kid path-traversal",
+   "esperado": "header-kid-injection"
+  },
+  {
+   "vetor": "crit presente",
+   "esperado": "header-crit"
+  },
+  {
+   "vetor": "cty:JWT declarado",
+   "esperado": "header-cty-nested"
+  },
+  {
+   "vetor": "aninhamento real",
+   "esperado": "payload-nested-jwt"
+  },
+  {
+   "vetor": "claim carrega JWT",
+   "esperado": "payload-nested-jwt"
+  },
+  {
+   "vetor": "sem exp",
+   "esperado": "claim-no-exp"
+  },
+  {
+   "vetor": "expirado",
+   "esperado": "claim-expired"
+  },
+  {
+   "vetor": "vida longa",
+   "esperado": "claim-long-lifetime"
+  },
+  {
+   "vetor": "sem iat",
+   "esperado": "claim-no-iat"
+  },
+  {
+   "vetor": "sem aud",
+   "esperado": "claim-no-aud"
+  },
+  {
+   "vetor": "sem iss",
+   "esperado": "claim-no-iss"
+  },
+  {
+   "vetor": "exp não-numérico",
+   "esperado": "claim-malformed-time"
+  },
+  {
+   "vetor": "nbf no futuro",
+   "esperado": "claim-nbf-future"
+  },
+  {
+   "vetor": "segredo no payload",
+   "esperado": "payload-sensitive"
+  },
+  {
+   "vetor": "CPF no payload (LGPD)",
+   "esperado": "payload-sensitive"
+  }
+ ],
+ "negativos": [
+  {
+   "vetor": "RS256 completo"
+  },
+  {
+   "vetor": "PS256 completo"
+  },
+  {
+   "vetor": "EdDSA completo"
+  },
+  {
+   "vetor": "RS256 com roles"
+  },
+  {
+   "vetor": "RS256 com nbf passado"
+  },
+  {
+   "vetor": "ES256 completo"
+  }
+ ]
+}

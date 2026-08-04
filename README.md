@@ -6,7 +6,7 @@
 
 ### Auditor de segurança de tokens **JWT/JWS** — do diagnóstico ao PoC, com o lado da correção junto.
 
-*Decodifica, audita e ataca (com autorização) tokens JWT: `alg:none`, confusão de algoritmo (RS→HS), segredo HMAC fraco, `kid`/`jku`/`x5u` como vetor de SSRF/injeção, e validação de claims. Inclui um módulo de **referência de validação correta** — porque encontrar a falha e mostrar como corrigir é o serviço completo.*
+*Decodifica, audita e ataca (com autorização) tokens JWT: `alg:none`, confusão de algoritmo (RS→HS), segredo HMAC fraco, `kid`/`jku`/`x5u` como vetor de SSRF/injeção, e validação de claims. Inclui uma **referência mínima segura** de validação — porque encontrar a falha e mostrar como corrigir é o serviço completo.*
 
 [![CI](https://github.com/Paulo-Marcos-Lucio/chaveiro/actions/workflows/ci.yml/badge.svg)](https://github.com/Paulo-Marcos-Lucio/chaveiro/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -28,7 +28,7 @@ JWT é simples de emitir e **fácil de validar errado**. A maioria dos bypasses 
 - ele resolve a chave a partir de um campo do cabeçalho (`jku`/`x5u`/`jwk`) controlado pelo atacante;
 - ele usa `kid` direto num caminho de arquivo ou numa query SQL.
 
-O Chaveiro cobre esses vetores dos dois lados: **audita** um token, **prova** a falha com um PoC quando aplicável, e mostra a **validação correta** como referência.
+O Chaveiro cobre esses vetores dos dois lados: **audita** um token, **prova** a falha com um PoC quando aplicável, e traz uma **referência mínima segura** de validação para você espelhar no seu verificador.
 
 > **Contexto:** venho de **Open Finance / FAPI**, onde JWT/JWS (DPoP, client assertions, `id_token`) são o coração da autenticação. Este é o ferramental que uso para revisar esse tipo de integração.
 
@@ -56,14 +56,20 @@ O Chaveiro cobre esses vetores dos dois lados: **audita** um token, **prova** a 
 
 ## 📊 Prova de campo
 
-Não é folheto: os números abaixo foram **medidos rodando o CLI** numa bateria de execução real — vetores de ataque conhecidos de um lado, tokens legítimos do outro.
+Não é folheto: os números abaixo saem de um **corpus rotulado e versionado** (`bench/`), reproduzível com dois comandos — vetores de ataque de um lado, tokens legítimos do outro. O corpus é **gerado pelo próprio script** (não se versiona token pronto) e o recall vem com **intervalo de confiança de Wilson**, porque com n=22 um número redondo sozinho anuncia uma precisão que a amostra não comporta.
+
+```bash
+python bench/gerar.py       # materializa os tokens rotulados (gitignored)
+python bench/avaliar.py     # mede recall + IC95% e falso-positivo
+```
 
 | Métrica | Valor medido |
 | --- | --- |
-| **Recall** em vetores de ataque | **22 / 22** — `alg:none`, confusão RS→HS, injeção em `kid`/`jku`, JWT aninhado real, CPF (mód-11) |
-| **Falso-positivo** em tokens legítimos | **0** — 6 / 6 tokens bem-formados passaram limpos |
-| **Throughput** (`batch`) | **24.606 tokens/s** (~40,6 µs/token) |
+| **Recall** em vetores de ataque | **22 / 22 = 100%** · IC95% (Wilson) **[85% ; 100%]** — `alg:none`/ausente/desconhecido, `jku`/`x5u`/`jwk`/`x5c`, `kid` injection, `crit`, `cty:JWT`, aninhamento real, claim carregando JWT, `exp`/`iat`/`aud`/`iss` ausentes, expirado, vida longa, tempo malformado, `nbf` futuro, segredo no payload, CPF (mód-11) |
+| **Falso-positivo** em tokens legítimos | **0 / 6** — RS256/PS256/ES256/EdDSA completos passaram limpos |
 | **Resiliência a token hostil** | um JWT com aninhamento profundo **não derruba o lote** — é isolado, registrado no campo `error` e a auditoria dos demais segue |
+
+O corpus **não é campo**: os tokens foram plantados por quem escreveu a ferramenta, então o número mede *cobertura dos vetores conhecidos*, não acurácia contra tráfego de produção. Ver `bench/README.md` para o que ele cobre e o que **não** cobre.
 
 **Falso-positivo conhecido (transparência, não vitrine):** o detector `payload-sensitive` casa `secret` como *substring* do nome da claim, de propósito, para pegar as formas compostas reais (`client_secret`, `db_secret`, `dbSecret`). O custo é que uma claim chamada `secretary` também é sinalizada. É um aviso de severidade **baixa**, nunca um bypass — mas prefiro documentar aqui a decidir por você que você não ia notar.
 
@@ -94,8 +100,9 @@ pip install -e ".[dev]"
 # audita um token (decodifica + todas as checagens passivas)
 chaveiro inspect "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhZG1pbiJ9."
 
-# em JSON, para pipelines
-chaveiro inspect "$TOKEN" -f json --fail-on high
+# PREFIRA ler o token do stdin ('-'): passá-lo por argumento deixa a credencial
+# no histórico do shell e na lista de processos (ps/EDR). Por isso o argv avisa.
+echo "$TOKEN" | chaveiro inspect - -f json --fail-on high
 
 # audita vários tokens de uma vez — UM TOKEN POR LINHA (ignora branco/comentário e prefixo 'Bearer')
 chaveiro batch tokens.txt --fail-on high        # sai 1 se algum token atingir o limiar
@@ -122,7 +129,24 @@ build por um achado informativo. No `batch`, linha malformada é ruído normal d
 log: vai para o stderr e **não** falha o build (use `--strict` para travar
 nela). Níveis aceitos: `none | info | low | medium | high | critical`.
 
-### O lado da correção — validação de referência
+**Token no argv e no stdin.** `inspect`, `crack`, `forge` e `forge-confusion`
+aceitam `-` para ler o token do **stdin** (o `batch` também). Passar o token por
+argumento vaza no histórico do shell e na lista de processos, então o argv **emite
+um aviso** apontando o caminho seguro. Prefira o stdin em qualquer terminal
+compartilhado ou com histórico.
+
+**Privacidade das claims (LGPD).** Um JWT de cliente carrega rotineiramente PII do
+**titular final** (`sub`, `email`, `cpf`, nome). Por padrão o laudo **redige** as
+claims de identidade e qualquer valor que aparente e-mail/CPF, mantendo visíveis as
+claims estruturais que a auditoria precisa (`exp`, `iat`, `nbf`, `iss`, `aud`,
+`jti`, `typ`, `kid`). Use `--claims-completas` para ver tudo em claro — é opt-in
+explícito, com aviso, porque quem grava o laudo é o operador desse dado.
+
+O envelope JSON traz ainda `commit`, `ruleset_hash` (sha256 do catálogo de
+checagens) e `artifact_sha256` (autoverificável), para o laudo ser vinculável ao
+código e às regras que o produziram.
+
+### O lado da correção — referência mínima segura
 
 ```python
 from chaveiro.reference.secure_validation import validate, InvalidToken
@@ -134,10 +158,19 @@ claims = validate(
     algorithms=["RS256"],  # nunca leia o alg do token
     audience="minha-api",
     issuer="https://auth.exemplo",
+    typ="at+jwt",  # opcional: fixa o 'typ' esperado (RFC 9068)
 )
 ```
 
-O que torna essa função segura está documentado nela mesma — é o material que entrego ao cliente junto do diagnóstico.
+É uma **referência mínima segura**, não um verificador completo pronto para
+produção. O que ela **cobre**: allowlist obrigatória de algoritmos, rejeição de
+`none` (inclusive na allowlist), verificação de assinatura HS*/RS*/PS*/ES*/EdDSA,
+`exp`/`nbf` (com `leeway`) rejeitando NumericDate malformado (fail-closed),
+`aud`/`iss`, `typ` quando exigido, e **falha explícita em JWT aninhado** (`cty:JWT`)
+em vez de devolver claims vazias. O que ela **não** cobre: revogação/`jti`,
+rotação e resolução de chave (JWKS/`kid`), `azp`/`nonce`/PKCE, replay e a validação
+da segunda camada de um token aninhado. Adapte ao seu stack — é o material que
+entrego ao cliente junto do diagnóstico, não um drop-in.
 
 ---
 
@@ -147,10 +180,10 @@ O que torna essa função segura está documentado nela mesma — é o material 
 
 | | Ferramenta pública — **você roda** | Pro · serviço — **eu conduzo com você** |
 | --- | --- | --- |
-| **Motor de detecção** | O mesmo — **22/22** vetores, **0** falso-positivo, **24.606 tokens/s** | O **mesmo** motor, apontado para o seu fluxo real de autenticação |
+| **Motor de detecção** | O mesmo — **22/22** vetores (corpus `bench/`, IC95% [85%;100%]), **0** falso-positivo em 6 tokens legítimos | O **mesmo** motor, apontado para o seu fluxo real de autenticação |
 | **Escopo** | O token que você colar, ou o arquivo/log que você tiver | Emissor **e** verificador do sistema inteiro, mais o histórico de tokens em log |
 | **PoC de exploração** | `crack` / `forge` / `forge-confusion` na sua bancada | PoC **autorizado**, com escopo assinado, rodado no seu ambiente e documentado |
-| **Correção** | Módulo `reference/` documentado — você adapta ao seu código | Validação de referência **implementada e testada no seu stack**, entregue via PR |
+| **Correção** | Módulo `reference/` (referência mínima segura) documentado — você adapta ao seu código | Validação **implementada e testada no seu stack**, entregue via PR |
 | **Segredo HMAC fraco** | A ferramenta aponta o risco | **Rotação conduzida com reteste** — confirmo que o novo segredo resiste |
 | **Transferência** | README + código-fonte aberto | **Mentoria**: seu time entende o porquê de cada bypass, não só o patch |
 
@@ -181,7 +214,7 @@ flowchart LR
     RPT --> CON["console (rich)"]
     RPT --> JSN["JSON (schema suite-appsec/1)"]
     CLI --> ATK["attacks/ — crack · confusion (PoC, autorizado)"]
-    FND -.->|correção de referência| REF["reference/ — validação correta"]
+    FND -.->|correção de referência| REF["reference/ — referência mínima segura"]
 ```
 
 ```
@@ -189,7 +222,7 @@ src/chaveiro/
 ├── core/        # jwt (base64url, HMAC, verificação RS/PS/ES/EdDSA via cryptography), modelos
 ├── checks/      # catálogo declarativo + detectores (alg, header, claims, payload)
 ├── attacks/     # crack (dicionário HMAC) e confusion (PoC RS→HS)
-├── reference/   # validação CORRETA, documentada — o lado da correção
+├── reference/   # referência mínima segura, documentada — o lado da correção
 ├── report/      # console (rich) e json
 ├── audit.py     # orquestração: auditar um token e em lote (batch)
 └── cli.py       # interface typer

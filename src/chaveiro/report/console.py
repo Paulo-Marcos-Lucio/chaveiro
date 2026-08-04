@@ -20,6 +20,7 @@ from rich.text import Text
 from chaveiro.audit import TokenOutcome, summarize
 from chaveiro.checks.catalog import OWASP_EDITION
 from chaveiro.core.models import AuditResult, DecodedToken, Finding, Severity
+from chaveiro.report.redaction import REDIGIDO, redact_claims
 
 _STYLE: dict[Severity, str] = {
     Severity.CRITICAL: "bold white on red",
@@ -41,9 +42,9 @@ _TIME_CLAIMS = ("exp", "iat", "nbf")
 _TOP_PRIORITIES = 3
 
 
-def render(result: AuditResult, console: Console | None = None) -> None:
+def render(result: AuditResult, console: Console | None = None, *, redact: bool = False) -> None:
     console = console or Console()
-    _render_token(result, console)
+    _render_token(result, console, redact=redact)
     findings = result.sorted()
     if not findings:
         console.print("[bold green]✓ Nenhuma fraqueza detectada nas checagens passivas.[/]")
@@ -77,12 +78,12 @@ def _render_action_plan(findings: list[Finding], console: Console) -> None:
     console.print(Panel(body, title="Plano de ação — comece por aqui", border_style="green"))
 
 
-def _render_token(result: AuditResult, console: Console) -> None:
+def _render_token(result: AuditResult, console: Console, *, redact: bool = False) -> None:
     body = Text.assemble(
         ("header\n", "bold cyan"),
         json.dumps(result.token.header, indent=2, ensure_ascii=False),
         ("\n\nclaims\n", "bold cyan"),
-        _claims_with_readable_times(result),
+        _claims_with_readable_times(result, redact=redact),
     )
     console.print(
         Panel(
@@ -93,13 +94,14 @@ def _render_token(result: AuditResult, console: Console) -> None:
     )
 
 
-def _claims_with_readable_times(result: AuditResult) -> str:
+def _claims_with_readable_times(result: AuditResult, *, redact: bool = False) -> str:
     if result.token.nested is not None:
         return (
             "<JWT aninhado: o payload desta casca é outro JWS compacto>\n"
             "Audite o token interno separadamente: chaveiro inspect <token-interno>"
         )
-    payload = dict(result.token.payload)
+    # P1-01: mesmo no console a PII do titular é redigida por padrão.
+    payload = redact_claims(result.token.payload) if redact else dict(result.token.payload)
     notes = []
     for claim in _TIME_CLAIMS:
         value = payload.get(claim)
@@ -121,14 +123,24 @@ def _short_owasp(finding: Finding) -> str:
     return finding.owasp.split(":")[0]
 
 
-def _describe(token: DecodedToken) -> str:
-    """Identificador curto e legível de um token para a tabela do lote."""
-    subject = token.payload.get("sub") or token.payload.get("iss")
-    label = f" · {subject}" if isinstance(subject, str) and subject else ""
-    return f"alg={token.alg or '—'}{label}"
+def _describe(token: DecodedToken, *, redact: bool = False) -> str:
+    """Identificador curto e legível de um token para a tabela do lote.
+
+    Prefere 'iss' (estrutural) a 'sub' (identidade do titular). Se cair no 'sub',
+    ele é redigido por padrão — a tabela do lote também não pode vazar PII.
+    """
+    iss = token.payload.get("iss")
+    if isinstance(iss, str) and iss:
+        return f"alg={token.alg or '—'} · {iss}"
+    sub = token.payload.get("sub")
+    if isinstance(sub, str) and sub:
+        return f"alg={token.alg or '—'} · {REDIGIDO if redact else sub}"
+    return f"alg={token.alg or '—'}"
 
 
-def render_batch(outcomes: list[TokenOutcome], console: Console | None = None) -> None:
+def render_batch(
+    outcomes: list[TokenOutcome], console: Console | None = None, *, redact: bool = False
+) -> None:
     console = console or Console()
     table = Table(show_lines=False, expand=True, header_style="bold")
     table.add_column("#", no_wrap=True, justify="right")
@@ -142,7 +154,7 @@ def render_batch(outcomes: list[TokenOutcome], console: Console | None = None) -
             severity = Text("ERRO", style="bold magenta")
             count = "—"
         else:
-            token_desc = Text(_describe(outcome.result.token))
+            token_desc = Text(_describe(outcome.result.token, redact=redact))
             top = outcome.result.max_severity()
             severity = (
                 Text(_LABEL[top], style=_STYLE[top])

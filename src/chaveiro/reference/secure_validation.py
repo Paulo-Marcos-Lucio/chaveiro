@@ -21,6 +21,9 @@ from typing import Any
 from chaveiro.core.jwt import decode, verify_asymmetric, verify_hmac
 
 _HS = {"HS256", "HS384", "HS512"}
+# RFC 7519 §4.1.10 / §5.2: 'cty' com valor JWT marca um JWT aninhado — o payload é
+# outro JWS. Comparação case-insensitive, com o prefixo "application/" opcional.
+_CTY_NESTED = {"jwt", "application/jwt"}
 _ASYM = {
     "RS256",
     "RS384",
@@ -48,12 +51,20 @@ def validate(
     issuer: str | None = None,
     now: int | None = None,
     leeway: int = 0,
+    typ: str | None = None,
 ) -> dict[str, Any]:
     """Valida um JWT com política estrita e devolve o payload confiável.
 
     ``algorithms`` é uma **allowlist obrigatória** — sem ela, tudo o mais é
     inútil. ``key`` é o segredo HMAC (para HS*) ou a chave pública PEM
     (RS*/PS*/ES*/EdDSA).
+
+    ``typ`` é opcional: quando informado, o cabeçalho ``typ`` do token tem que
+    existir e casar (case-insensitive) — útil para fixar ``at+jwt`` (RFC 9068) e
+    impedir a confusão entre tipos de token. **JWT aninhado** (``cty: JWT``, RFC
+    7519 §5.2) é rejeitado explicitamente: esta referência valida uma camada, e
+    devolver o payload vazio da casca como se fosse confiável seria fail-open —
+    valide as duas camadas separadamente.
     """
     if not algorithms:
         raise InvalidToken("defina uma allowlist de algoritmos (nunca aceite o alg do token)")
@@ -61,6 +72,8 @@ def validate(
         raise InvalidToken("'none' jamais deve estar na allowlist")
 
     decoded = decode(token_str)
+    _check_not_nested(decoded)
+    _check_typ(decoded.header, typ)
     alg = decoded.alg
     if alg not in algorithms:
         raise InvalidToken(f"algoritmo {alg!r} fora da allowlist {algorithms}")
@@ -78,6 +91,40 @@ def validate(
     _check_audience(decoded.payload, audience)
     _check_issuer(decoded.payload, issuer)
     return decoded.payload
+
+
+def _check_not_nested(decoded: Any) -> None:
+    """Rejeita JWT aninhado — a referência não repassa o miolo como confiável.
+
+    Dois sinais: o ``decode`` já detectou que o payload é outro JWS (``nested``),
+    ou o cabeçalho declara ``cty: JWT``. Antes desta checagem, um token aninhado
+    tinha payload ``{}`` e a função devolvia esse dict vazio em silêncio: um
+    verificador que confiasse no retorno trataria "sem claims" como válido.
+    """
+    if decoded.nested is not None:
+        raise InvalidToken(
+            "JWT aninhado (payload é outro JWS, RFC 7519 §5.2): valide cada camada "
+            "separadamente; esta referência não repassa o token interno como confiável"
+        )
+    cty = decoded.header.get("cty")
+    if isinstance(cty, str) and cty.strip().lower() in _CTY_NESTED:
+        raise InvalidToken(
+            "cabeçalho declara 'cty: JWT' (JWT aninhado): valide as duas camadas separadamente"
+        )
+
+
+def _check_typ(header: dict[str, Any], expected: str | None) -> None:
+    """Confere o cabeçalho ``typ`` quando o chamador o exige.
+
+    RFC 7519 §5.1: ``typ`` é opcional, então só é checado quando ``expected`` é
+    dado. Ausência com ``expected`` definido é erro — não pode ser tratada como
+    'ok' (fail-open). A comparação é case-insensitive (RFC 7515: 'JWT' == 'jwt').
+    """
+    if expected is None:
+        return
+    actual = header.get("typ")
+    if not isinstance(actual, str) or actual.strip().lower() != expected.strip().lower():
+        raise InvalidToken(f"cabeçalho 'typ' inválido: esperava {expected!r}, veio {actual!r}")
 
 
 def _check_time(payload: dict[str, Any], now: int, leeway: int) -> None:
