@@ -1,0 +1,6 @@
+# Tokens materializados por gerar.py — corpus não versiona credenciais/tokens
+# prontos (o push protection recusa e está certo). O manifest.json (rótulos) e o
+# código que reconstrói os tokens são o que fica versionado.
+positivos.txt
+negativos.txt
+resultado.json
