@@ -252,7 +252,7 @@ def check_payload(token: DecodedToken) -> list[Finding]:
                     evidence=f"{path}=…",
                 )
             )
-        elif isinstance(value, str) and _has_cpf(value):
+        elif isinstance(value, str) and has_cpf(value):
             out.append(
                 make_finding(
                     "payload-sensitive",
@@ -312,7 +312,13 @@ def _tokenize_key(key: str) -> set[str]:
     return {tok.lower() for tok in spaced.split()}
 
 
-def _has_cpf(value: str) -> bool:
+def has_cpf(value: str) -> bool:
+    """True se a string contém um CPF com dígitos verificadores válidos (mód-11).
+
+    Público porque a redação de PII do laudo (``report.redaction``) usa o mesmo
+    critério de CPF do detector — uma fonte única evita divergência entre "o que
+    é sinalizado" e "o que é redigido".
+    """
     return any(_cpf_digits_ok(_NOT_DIGIT.sub("", m.group())) for m in _CPF.finditer(value))
 
 

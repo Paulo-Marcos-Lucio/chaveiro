@@ -38,6 +38,18 @@ _AVISO_AUTORIZACAO = (
     "explícita e por escrito para testar. No Brasil, acesso não autorizado a dispositivo "
     "informático é crime (Lei 12.737/2012, agravada pela Lei 14.155/2021)."
 )
+# P1-02: token por argv vaza no histórico do shell e na lista de processos (ps/EDR).
+_AVISO_ARGV = (
+    "⚠ Token recebido por argumento — ele fica gravado no histórico do shell e "
+    "visível na lista de processos (ps/EDR). Prefira o stdin: passe '-' e canalize "
+    'o token, ex.: `echo "$TOKEN" | chaveiro inspect -`.'
+)
+# P1-01: aviso ao ligar --claims-completas (PII do titular sai em claro).
+_AVISO_CLAIMS_COMPLETAS = (
+    "⚠ --claims-completas: as claims saem em CLARO, incluindo PII do titular final "
+    "(sub/email/cpf/nome). Você é o operador LGPD desse dado — use só se necessário "
+    "e não deixe o laudo em claro em repositório ou canal compartilhado."
+)
 
 
 class Format(str, Enum):
@@ -59,6 +71,23 @@ class FailOn(str, Enum):
 
 def _aviso_autorizacao() -> None:
     err.print(f"[yellow]{_AVISO_AUTORIZACAO}[/]")
+
+
+def _resolve_token(token: str) -> str:
+    """Resolve o token do argumento ou do stdin ('-'), avisando sobre o argv.
+
+    O caminho seguro (stdin) é silencioso; o inseguro (argv) sempre sinaliza o
+    risco e o comando alternativo — o defeito P1-02 era justamente o argv ser o
+    padrão sem qualquer aviso.
+    """
+    if token.strip() == "-":
+        data = sys.stdin.read().strip()
+        if not data:
+            err.print("[red]Nenhum token recebido no stdin.[/]")
+            raise typer.Exit(2)
+        return data
+    err.print(f"[yellow]{_AVISO_ARGV}[/]")
+    return token
 
 
 def _txt(value: object) -> Text:
@@ -109,21 +138,30 @@ def _coerce(raw: str) -> Any:
 
 @app.command()
 def inspect(
-    token: str = typer.Argument(..., help="O JWT a auditar."),
+    token: str = typer.Argument(..., help="O JWT a auditar; use '-' para ler do stdin."),
     fmt: Format = typer.Option(Format.console, "--format", "-f", help="Formato de saída."),
     now: int | None = typer.Option(None, "--now", help="Epoch a usar como 'agora' (para testes)."),
     fail_on: FailOn = typer.Option(FailOn.high, "--fail-on", help="Severidade que faz sair com 1."),
+    claims_completas: bool = typer.Option(
+        False,
+        "--claims-completas",
+        help="Mostra as claims em CLARO (PII do titular). Por padrão são redigidas.",
+    ),
 ) -> None:
     """Decodifica e roda todas as checagens passivas de segurança."""
+    token = _resolve_token(token)
+    if claims_completas:
+        err.print(f"[yellow]{_AVISO_CLAIMS_COMPLETAS}[/]")
     try:
         result = audit_token(token, now if now is not None else int(time.time()))
     except JWTError as exc:
         err.print("[red]Token inválido:[/]", _txt(exc))
         raise typer.Exit(2) from exc
+    redact = not claims_completas
     if fmt is Format.json:
-        typer.echo(to_json(result))
+        typer.echo(to_json(result, redact=redact))
     else:
-        console_report.render(result)
+        console_report.render(result, redact=redact)
     top = result.max_severity()
     raise typer.Exit(1 if top is not None and top.rank >= fail_on.rank() else 0)
 
@@ -151,6 +189,11 @@ def batch(
     strict: bool = typer.Option(
         False, "--strict", help="Também falha (1) se alguma linha estiver malformada."
     ),
+    claims_completas: bool = typer.Option(
+        False,
+        "--claims-completas",
+        help="Mostra as claims em CLARO (PII do titular). Por padrão são redigidas.",
+    ),
 ) -> None:
     """Audita vários tokens (um por linha) de um arquivo ou stdin.
 
@@ -164,14 +207,17 @@ def batch(
     arquivo ilegível), como manda a convenção do Click.
     """
     text = _read_source(path)
+    if claims_completas:
+        err.print(f"[yellow]{_AVISO_CLAIMS_COMPLETAS}[/]")
     outcomes = audit_batch(text, now if now is not None else int(time.time()))
     if not outcomes:
         err.print("[yellow]Nenhum token encontrado na entrada.[/] (um token por linha)")
         raise typer.Exit(0)
+    redact = not claims_completas
     if fmt is Format.json:
-        typer.echo(batch_to_json(outcomes))
+        typer.echo(batch_to_json(outcomes, redact=redact))
     else:
-        console_report.render_batch(outcomes)
+        console_report.render_batch(outcomes, redact=redact)
     summary = summarize(outcomes)
     if summary.errors:
         err.print(f"[yellow]{summary.errors} linha(s) malformada(s) ignorada(s).[/]")
@@ -182,7 +228,9 @@ def batch(
 
 @app.command()
 def crack(
-    token: str = typer.Argument(..., help="Um JWT assinado com HS256/384/512."),
+    token: str = typer.Argument(
+        ..., help="Um JWT assinado com HS256/384/512; use '-' para ler do stdin."
+    ),
     wordlist: Path | None = typer.Option(
         None, "--wordlist", "-w", exists=True, help="Arquivo de candidatos (um por linha)."
     ),
@@ -192,6 +240,7 @@ def crack(
 ) -> None:
     """Testa se o segredo HMAC é fraco (ataque de dicionário)."""
     _aviso_autorizacao()
+    token = _resolve_token(token)
     decoded = _decode_or_die(token)
     if decoded.alg not in {"HS256", "HS384", "HS512"}:
         err.print(
@@ -230,7 +279,9 @@ def _iter_wordlist(path: Path) -> Any:
 
 @app.command("forge-confusion")
 def forge_confusion(
-    token: str = typer.Argument(..., help="Token de origem (tipicamente RS*/ES*)."),
+    token: str = typer.Argument(
+        ..., help="Token de origem (tipicamente RS*/ES*); use '-' para ler do stdin."
+    ),
     public_key: Path = typer.Option(
         ..., "--public-key", "-k", help="Chave pública PEM do servidor."
     ),
@@ -241,6 +292,7 @@ def forge_confusion(
 ) -> None:
     """Forja um token (RS→HS) usando a chave pública como segredo HMAC — PoC de confusão de algoritmo."""
     _aviso_autorizacao()
+    token = _resolve_token(token)
     decoded = _decode_or_die(token)
     pem = public_key.read_bytes()
     forged = forge_rs_to_hs(decoded, pem, alg=alg, edits=_parse_set(set_claims))
@@ -253,7 +305,7 @@ def forge_confusion(
 
 @app.command()
 def forge(
-    token: str = typer.Argument(..., help="Token de origem."),
+    token: str = typer.Argument(..., help="Token de origem; use '-' para ler do stdin."),
     secret: str = typer.Option(..., "--secret", "-s", help="Segredo HMAC conhecido/quebrado."),
     alg: str = typer.Option("HS256", "--alg", help="Algoritmo HS*."),
     set_claims: list[str] = typer.Option(
@@ -262,6 +314,7 @@ def forge(
 ) -> None:
     """Reassina um token modificado com um segredo conhecido (teste autorizado)."""
     _aviso_autorizacao()
+    token = _resolve_token(token)
     decoded = _decode_or_die(token)
     header = {**decoded.header, "alg": alg}
     payload = {**decoded.payload, **_parse_set(set_claims)}
