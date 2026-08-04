@@ -15,8 +15,9 @@ from rich.console import Console
 from chaveiro.checks.detectors import run_all
 from chaveiro.core.jwt import JWTError, b64url_encode, decode
 from chaveiro.core.models import AuditResult
-from chaveiro.reference.secure_validation import validate
+from chaveiro.reference.secure_validation import InvalidToken, validate
 from chaveiro.report.console import render
+from chaveiro.report.json_report import to_json
 
 NOW = 1_800_000_000
 
@@ -105,3 +106,62 @@ def test_crack_cli_reports_empty_secret() -> None:
 def test_crack_non_hmac_exits_2_not_misleading_0() -> None:
     result = _runner.invoke(app, ["crack", _none_token()])
     assert result.exit_code == 2  # 'não se aplica', não o exit 0 de 'segredo forte'
+
+
+# R1 — exp inteiro gigante (dentro do limite de dígitos do JSON, mas além do float)
+# fazia `round(lifetime / 3600, 1)` levantar OverflowError e DERRUBAR a auditoria:
+# traceback no `inspect`; no `batch` o token era engolido como "malformado" e o
+# achado de validade-longa-demais sumia (fail-open, gate verde). Agora audita.
+def test_exp_inteiro_gigante_nao_derruba_auditoria() -> None:
+    huge = 10**400  # 401 dígitos: json.loads decodifica, mas não cabe em float
+    header = b64url_encode(json.dumps({"alg": "HS256"}).encode("utf-8"))
+    payload = b64url_encode(json.dumps({"exp": huge, "iat": NOW}).encode("utf-8"))
+    decoded = decode(f"{header}.{payload}.AAAA")
+    findings = run_all(decoded, NOW)  # não pode levantar OverflowError
+    ids = {f.check_id for f in findings}
+    assert "claim-long-lifetime" in ids  # achado preservado, não perdido
+    result = AuditResult(token=decoded, findings=findings)
+    assert to_json(result)  # serialização JSON não levanta
+    console = Console(file=io.StringIO(), width=200)
+    render(result, console)  # render console não levanta
+    assert console.file.getvalue()  # type: ignore[attr-defined]
+
+
+# R2 — inteiro literal além de sys.get_int_max_str_digits() (~4300) faz json.loads
+# levantar um ValueError CRU (não JSONDecodeError) que vazava do decode: crash no
+# `inspect`. Agora vira JWTError, e no batch é isolado sem contaminar o token bom.
+def test_inteiro_alem_do_limite_de_digitos_vira_jwterror() -> None:
+    big = "1" + "0" * 5000  # 5001 dígitos > limite -> json.loads levanta ValueError cru
+    header = b64url_encode(json.dumps({"alg": "HS256"}).encode("utf-8"))
+    payload = b64url_encode(('{"exp":' + big + "}").encode("utf-8"))
+    hostil = f"{header}.{payload}.AAAA"
+    with pytest.raises(JWTError):  # falha ALTO, nunca ValueError cru / traceback
+        decode(hostil)
+
+    from chaveiro.audit import audit_batch, summarize
+
+    bom = encode_hmac(
+        {"alg": "HS256"}, {"sub": "x", "exp": NOW + 60, "iat": NOW, "aud": "a", "iss": "i"}, b"s"
+    )
+    outcomes = audit_batch(f"{hostil}\n{bom}\n", NOW)
+    assert outcomes[0].result is None and outcomes[0].error is not None  # hostil isolado
+    assert outcomes[1].ok  # token legítimo ainda auditado
+    assert summarize(outcomes).errors == 1
+
+
+# R3 — validador de REFERÊNCIA (o "jeito certo") estourava OverflowError com um
+# exp/nbf inteiro gigante: `math.isfinite(10**400)` / `float(10**400)` não cabem
+# em double. Um token hostil não pode derrubar a validação; a comparação temporal
+# tem que rodar em int de precisão arbitrária, sem virar FN nas claims malformadas.
+def test_validador_referencia_nao_estoura_com_exp_gigante() -> None:
+    # exp astronômico: token NÃO expirado -> aceito, sem OverflowError.
+    aceito = encode_hmac({"alg": "HS256"}, {"exp": 10**400, "sub": "a"}, b"k")
+    assert validate(aceito, key=b"k", algorithms=["HS256"], now=NOW)["sub"] == "a"
+    # nbf astronômico: token ainda-não-válido -> InvalidToken (não crash).
+    futuro = encode_hmac({"alg": "HS256"}, {"nbf": 10**400, "sub": "a"}, b"k")
+    with pytest.raises(InvalidToken):
+        validate(futuro, key=b"k", algorithms=["HS256"], now=NOW)
+    # sem FN: exp em string continua rejeitado como NumericDate inválido.
+    string_exp = encode_hmac({"alg": "HS256"}, {"exp": "1700", "sub": "a"}, b"k")
+    with pytest.raises(InvalidToken):
+        validate(string_exp, key=b"k", algorithms=["HS256"], now=NOW)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from chaveiro.checks.catalog import CATALOG
-from chaveiro.checks.detectors import run_all
+from chaveiro.checks.detectors import _is_sensitive_key, run_all
 from chaveiro.core.jwt import decode
 from chaveiro.core.models import Severity
 from tests.conftest import hs_token, raw_token
@@ -134,6 +134,24 @@ def test_alg_none_is_critical() -> None:
     assert any(f.check_id == "alg-none" and f.severity is Severity.CRITICAL for f in findings)
 
 
+@pytest.mark.parametrize("alg", ["none ", " none", "NoNe\t", "\tNoNe", "  none  ", "None "])
+def test_alg_none_with_surrounding_whitespace_is_critical(alg: str) -> None:
+    # Um verificador leniente faz strip e aceita o token não-assinado; 'none '
+    # com espaço/tab NÃO pode cair para alg-unknown (MEDIUM). Deve ser CRÍTICO.
+    findings = run_all(decode(raw_token({"alg": alg}, {"sub": "a"})), NOW)
+    assert any(f.check_id == "alg-none" and f.severity is Severity.CRITICAL for f in findings), alg
+    # e nunca a rebaixa como algoritmo "desconhecido"
+    assert "alg-unknown" not in {f.check_id for f in findings}
+
+
+def test_alg_known_with_trailing_whitespace_not_unknown() -> None:
+    # Coerência do strip: 'HS256 ' é HS256 para quem faz strip — vira advisory,
+    # não alg-unknown.
+    ids = {f.check_id for f in run_all(decode(raw_token({"alg": "HS256 "}, {"sub": "a"})), NOW)}
+    assert "alg-hmac-advisory" in ids
+    assert "alg-unknown" not in ids
+
+
 def test_missing_exp() -> None:
     token = hs_token({"sub": "a", "iat": NOW, "aud": "x", "iss": "y"})
     assert "claim-no-exp" in _ids(token)
@@ -174,6 +192,46 @@ def test_sensitive_payload() -> None:
 def test_cpf_in_payload() -> None:
     token = hs_token({"exp": NOW + 60, "iat": NOW, "aud": "x", "iss": "y", "doc": "123.456.789-09"})
     assert "payload-sensitive" in _ids(token)
+
+
+# --------------------------------------------------------------------------- #
+# _is_sensitive_key: radical curto ancorado à fronteira de palavra.
+# A substring achatada casava 'resenha'/'secretaria' (FP). Radical curto agora
+# só conta como token inteiro; radical longo segue como substring; formas
+# compostas reais (com separador/camelCase) continuam pegando.
+# --------------------------------------------------------------------------- #
+
+# Palavras inocentes que CONTÊM um radical curto como substring — não podem casar.
+_CHAVES_NAO_SENSIVEIS = [
+    "resenha", "desenha", "senharia", "secretaria", "secretary", "greatsecret",
+    "pwded", "prensa", "pesquisa", "username", "email", "token_type",
+]  # fmt: skip
+
+# Chaves REAIS de segredo — não podem ser perdidas (precisão sem sacrificar recall).
+_CHAVES_SENSIVEIS = [
+    "password", "passwd", "senha", "secret", "pwd",
+    "senha_usuario", "user_password", "client_secret", "dbSecret", "secret_key",
+    "api_key", "apikey", "x-api-key", "private_key", "privateKey",
+    "pwdHash", "userPwd", "clientSecret", "USER_SENHA",
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("key", _CHAVES_NAO_SENSIVEIS)
+def test_chave_inocente_com_substring_nao_e_sensivel(key: str) -> None:
+    assert _is_sensitive_key(key) is False
+
+
+@pytest.mark.parametrize("key", _CHAVES_SENSIVEIS)
+def test_chave_real_de_segredo_continua_sensivel(key: str) -> None:
+    assert _is_sensitive_key(key) is True
+
+
+def test_payload_resenha_nao_dispara_mas_senha_dispara() -> None:
+    # Integração ponta-a-ponta: 'resenha' no payload não vira achado; 'senha' sim.
+    limpo = hs_token({"exp": NOW + 60, "iat": NOW, "aud": "x", "iss": "y", "resenha": "texto"})
+    assert "payload-sensitive" not in _ids(limpo)
+    real = hs_token({"exp": NOW + 60, "iat": NOW, "aud": "x", "iss": "y", "senha_usuario": "x"})
+    assert "payload-sensitive" in _ids(real)
 
 
 def test_hmac_advisory() -> None:
