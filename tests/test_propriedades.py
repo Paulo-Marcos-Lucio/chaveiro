@@ -34,8 +34,8 @@ def cpfs_validos(draw: st.DrawFn) -> str:
         return 0 if r < 2 else 11 - r
 
     d1 = _dv(base)
-    d2 = _dv(base + [d1])
-    nums = base + [d1, d2]
+    d2 = _dv([*base, d1])
+    nums = [*base, d1, d2]
     cpf = "".join(map(str, nums))
     return f"{cpf[:3]}.{cpf[3:6]}.{cpf[6:9]}-{cpf[9:]}"
 
