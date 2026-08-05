@@ -79,6 +79,11 @@ def artifact_sha256(document: dict[str, Any]) -> str:
 
     Serialização determinística (chaves ordenadas, sem espaços) para que o cliente
     recompute o mesmo valor a partir do JSON recebido.
+
+    IMPORTANTE para quem recomputa: o hash é sobre os **bytes UTF-8** do JSON (o catálogo
+    é PT-BR, então quase todo laudo tem acentos). No Windows, ``open(caminho)`` usa cp1252
+    por padrão e recompõe bytes diferentes — dando um "adulterado" FALSO. Leia sempre como
+    UTF-8: ``open(caminho, "rb").read().decode("utf-8")`` antes de recalcular.
     """
     sem_campo = {k: v for k, v in document.items() if k != "artifact_sha256"}
     blob = json.dumps(sem_campo, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
