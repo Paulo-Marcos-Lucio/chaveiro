@@ -6,6 +6,7 @@ import contextlib
 import json
 import sys
 import time
+from collections.abc import Iterator
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,7 @@ from chaveiro.attacks.crack import crack_with_defaults
 from chaveiro.audit import audit_batch, audit_token, summarize
 from chaveiro.checks.catalog import CATALOG, OWASP_EDITION
 from chaveiro.core.jwt import JWTError, decode, encode_hmac
-from chaveiro.core.models import Severity
+from chaveiro.core.models import DecodedToken, Severity
 from chaveiro.report import console as console_report
 from chaveiro.report.json_report import batch_to_json, to_json
 
@@ -110,7 +111,7 @@ def _root(
     pass
 
 
-def _decode_or_die(token: str) -> Any:
+def _decode_or_die(token: str) -> DecodedToken:
     try:
         return decode(token)
     except JWTError as exc:
@@ -263,7 +264,7 @@ def crack(
     raise typer.Exit(0)
 
 
-def _iter_wordlist(path: Path) -> Any:
+def _iter_wordlist(path: Path) -> Iterator[str]:
     """Gera candidatos linha a linha — memória O(1) e o 1º acerto encerra a leitura.
 
     Materializar a wordlist inteira (``read_text().splitlines()``) anulava o
