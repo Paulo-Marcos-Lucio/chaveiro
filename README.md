@@ -13,6 +13,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Ruff](https://img.shields.io/badge/lint-ruff-261230.svg)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-strict-2A6DB2.svg)](https://mypy-lang.org/)
+[![Tests](https://img.shields.io/badge/tests-184%20passing-brightgreen.svg)](#-qualidade-de-engenharia--método)
+[![Coverage](https://img.shields.io/badge/coverage-95%25-green.svg)](#-qualidade-de-engenharia--método)
 [![OWASP](https://img.shields.io/badge/OWASP_2025-A07%2FA04-000000.svg)](https://owasp.org/Top10/2025/)
 
 </div>
