@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chaveiro"
-version = "0.4.0"
+version = "0.5.0"
 description = "Auditor de segurança de tokens JWT/JWS — alg:none, confusão de algoritmo, brute de segredo HMAC, kid/jku SSRF e validação de claims."
 readme = "README.md"
 requires-python = ">=3.10"

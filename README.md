@@ -13,7 +13,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Ruff](https://img.shields.io/badge/lint-ruff-261230.svg)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-strict-2A6DB2.svg)](https://mypy-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-187%20passing-brightgreen.svg)](#-qualidade-de-engenharia--método)
+[![Tests](https://img.shields.io/badge/tests-191%20passing-brightgreen.svg)](#-qualidade-de-engenharia--método)
 [![Coverage](https://img.shields.io/badge/coverage-95%25-green.svg)](#-qualidade-de-engenharia--método)
 [![OWASP](https://img.shields.io/badge/OWASP_2025-A07%2FA04-000000.svg)](https://owasp.org/Top10/2025/)
 
@@ -284,7 +284,7 @@ src/chaveiro/
 
 ## 🔬 Qualidade de engenharia & método
 
-**Portões (medidos agora, não prometidos):** **187 testes** verdes (incluindo *property-based* com Hypothesis) · cobertura **95%** (o gate trava em `--cov-fail-under=90`) · `mypy --strict` limpo em **20 arquivos** · `ruff` (lint + format) limpo · CI em matriz **Python 3.10 / 3.11 / 3.12**.
+**Portões (medidos agora, não prometidos):** **191 testes** verdes (incluindo *property-based* com Hypothesis) · cobertura **95%** (o gate trava em `--cov-fail-under=90`) · `mypy --strict` limpo em **20 arquivos** · `ruff` (lint + format) limpo · CI em matriz **Python 3.10 / 3.11 / 3.12**.
 
 **Teste que fica vermelho se a detecção for desfeita.** A suíte não confirma só o caso positivo — guarda a *inversão silenciosa*. Cada detector tem um par negativo (`_CASOS_NEGATIVOS` em `tests/test_detectors.py`): trocar `nbf > agora` por `nbf < agora` passa em qualquer teste que só olhe o positivo, mas deixa o negativo vermelho. E um meta-teste (`test_toda_checagem_do_catalogo_tem_caso_positivo`) reprova o build se uma checagem nova nascer sem caso que a exercite — disciplina humana virou invariante.
 
