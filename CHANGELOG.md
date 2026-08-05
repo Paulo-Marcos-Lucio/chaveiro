@@ -5,6 +5,17 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
 
 ## [Não lançado]
 
+### Adicionado
+
+- **`-o/--output` em `inspect` e `batch`** (paridade com Guardião/Esteira). Grava o laudo direto em UTF-8,
+  evitando a armadilha do operador `>` do PowerShell (que recodifica linha a linha, lento e sujeito a
+  mojibake no Windows) e servindo de canal limpo para `upload-sarif` num passo de CI. Exige `--format json`.
+- **Nova checagem `header-zip-jws`** (HIGH · A06:2025 · CWE-409): `zip` (compressão) declarado num JWS de 3
+  segmentos. O parâmetro só é válido em JWE (RFC 7516); num JWS viola o RFC 7515 e é o vetor de **DoS por
+  descompressão pré-verificação** — a biblioteca que descomprime o payload antes de checar a assinatura
+  (caso Apache James) fica exposta sem o atacante conhecer chave nenhuma. Detectável offline, só lendo o
+  cabeçalho. Coberta por caso positivo e negativo + o meta-teste de catálogo.
+
 ### Documentação
 
 - **README com prova de campo e Pro honesto**: nova seção "Prova de campo" com
