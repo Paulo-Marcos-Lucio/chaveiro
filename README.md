@@ -75,7 +75,28 @@ O corpus **não é campo**: os tokens foram plantados por quem escreveu a ferram
 
 ---
 
-## 🚀 Instalação
+## 🚀 Início rápido
+
+**Pré-requisito:** Python **3.10+** (o CI cobre 3.10 / 3.11 / 3.12). Nada além
+disso — sem serviço, sem chave de API, sem rede: a auditoria é local e passiva.
+
+```bash
+# 1. instale direto do Git (não há pacote no PyPI — ver a nota em Instalação)
+pip install "git+https://github.com/Paulo-Marcos-Lucio/chaveiro.git"
+
+# 2. audite um token — este exemplo público é um alg:none (token NÃO assinado)
+echo "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhZG1pbiJ9." | chaveiro inspect -
+```
+
+Do zero ao primeiro laudo em dois comandos. A saída traz a claim `sub` **redigida**
+(LGPD), um achado **CRÍTICA `alg-none`** e os avisos de claims ausentes
+(`exp`/`aud`/`iss`), e o processo **sai com código 1** (achado ≥ `high`). Para uma
+saída de pipeline, troque por `chaveiro inspect - -f json`. É só isso para começar —
+o resto deste README aprofunda cada comando e opção.
+
+---
+
+## 📦 Instalação
 
 O Chaveiro **não está no PyPI** (`pip install chaveiro` traria outro pacote ou
 nada). Instale direto do repositório:
@@ -145,6 +166,23 @@ explícito, com aviso, porque quem grava o laudo é o operador desse dado.
 O envelope JSON traz ainda `commit`, `ruleset_hash` (sha256 do catálogo de
 checagens) e `artifact_sha256` (autoverificável), para o laudo ser vinculável ao
 código e às regras que o produziram.
+
+### Configuração — as opções que mais importam
+
+Nada aqui é obrigatório: o Chaveiro roda com os defaults. Mude só quando o
+contexto pedir. (`chaveiro <comando> --help` lista tudo.)
+
+| Opção | Onde | Default | Quando mudar |
+| --- | --- | --- | --- |
+| `-f, --format` | `inspect`, `batch` | `console` | `json` para consumir em pipeline/painel (schema `suite-appsec/1`) |
+| `--fail-on` | `inspect`, `batch` | `high` | baixe para `low`/`medium` num gate rígido; `none` para nunca falhar o build por severidade |
+| `--claims-completas` | `inspect`, `batch` | desligado | só quando precisar ver a PII em claro — opt-in com aviso, você vira o operador LGPD do laudo |
+| `--strict` | `batch` | desligado | quando linha malformada **deve** derrubar o build (por padrão é só ruído de log) |
+| `-w, --wordlist` | `crack` | — | somar sua wordlist (ex.: `rockyou.txt`) à lista fraca embutida |
+| `--no-defaults` | `crack` | desligado | testar **só** a sua wordlist, sem a lista embutida |
+| `--set chave=valor` | `forge`, `forge-confusion` | — | editar claims no PoC (repetível: `--set sub=admin --set role=admin`) |
+| `--alg` | `forge`, `forge-confusion` | `HS256` | forjar com outro HMAC (`HS384`/`HS512`) |
+| `CHAVEIRO_COMMIT` (env) | todos | `git rev-parse HEAD` | fixar o SHA de proveniência quando rodar de um pacote instalado (sem `.git`) |
 
 ### O lado da correção — referência mínima segura
 
@@ -232,7 +270,7 @@ src/chaveiro/
 
 ## 🔬 Qualidade de engenharia & método
 
-**Portões (medidos agora, não prometidos):** **168 testes** verdes · cobertura **94%** (o gate trava em `--cov-fail-under=90`) · `mypy --strict` limpo em **18 arquivos** · `ruff` (lint + format) limpo · CI em matriz **Python 3.10 / 3.11 / 3.12**.
+**Portões (medidos agora, não prometidos):** **184 testes** verdes · cobertura **95%** (o gate trava em `--cov-fail-under=90`) · `mypy --strict` limpo em **20 arquivos** · `ruff` (lint + format) limpo · CI em matriz **Python 3.10 / 3.11 / 3.12**.
 
 **Teste que fica vermelho se a detecção for desfeita.** A suíte não confirma só o caso positivo — guarda a *inversão silenciosa*. Cada detector tem um par negativo (`_CASOS_NEGATIVOS` em `tests/test_detectors.py`): trocar `nbf > agora` por `nbf < agora` passa em qualquer teste que só olhe o positivo, mas deixa o negativo vermelho. E um meta-teste (`test_toda_checagem_do_catalogo_tem_caso_positivo`) reprova o build se uma checagem nova nascer sem caso que a exercite — disciplina humana virou invariante.
 
