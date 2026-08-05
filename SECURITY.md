@@ -6,7 +6,7 @@ Correções de segurança são aplicadas à linha de release mais recente (`0.1.
 
 ## Divulgação responsável
 
-Reporte vulnerabilidades **de forma privada** para **pmlsp23@gmail.com** (assunto com prefixo `[security]`). Descreva o impacto e um passo a passo de reprodução. Dê um prazo razoável para correção antes de divulgar publicamente; crédito ao relator é dado por padrão, salvo pedido em contrário.
+Reporte vulnerabilidades **de forma privada** para **contatopml26@gmail.com** (assunto com prefixo `[security]`). Descreva o impacto e um passo a passo de reprodução. Dê um prazo razoável para correção antes de divulgar publicamente; crédito ao relator é dado por padrão, salvo pedido em contrário.
 
 ## Uso ético
 
