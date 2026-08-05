@@ -20,17 +20,19 @@ classifiers = [
   "Topic :: Security",
 ]
 dependencies = [
-  "typer>=0.12",
-  "rich>=13.7",
-  "cryptography>=42.0",
+  "typer>=0.15",
+  "rich>=13.9",
+  "cryptography>=44.0",
 ]
 
 [project.optional-dependencies]
+# Pisos elevados para as versões efetivamente instaladas e testadas nos portões
+# — o CI roda estas; um piso baixo só deixaria o Dependabot abrir PR redundante.
 dev = [
-  "pytest>=8.0",
-  "pytest-cov>=5.0",
-  "ruff>=0.5",
-  "mypy>=1.10",
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "ruff>=0.14",
+  "mypy>=1.14",
 ]
 
 [project.urls]

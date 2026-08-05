@@ -1,8 +1,12 @@
 # Política de Segurança
 
+## Versões suportadas
+
+Correções de segurança são aplicadas à linha de release mais recente (`0.1.x`) e à `main`. Versões anteriores não recebem retrofix — atualize para a última.
+
 ## Divulgação responsável
 
-Reporte vulnerabilidades **de forma privada** para **pmlsp23@gmail.com** (assunto com prefixo `[security]`). Dê um prazo razoável para correção antes de divulgar.
+Reporte vulnerabilidades **de forma privada** para **pmlsp23@gmail.com** (assunto com prefixo `[security]`). Descreva o impacto e um passo a passo de reprodução. Dê um prazo razoável para correção antes de divulgar publicamente; crédito ao relator é dado por padrão, salvo pedido em contrário.
 
 ## Uso ético
 
