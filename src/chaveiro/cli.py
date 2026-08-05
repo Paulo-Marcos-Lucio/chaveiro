@@ -141,6 +141,9 @@ def _coerce(raw: str) -> Any:
 def inspect(
     token: str = typer.Argument(..., help="O JWT a auditar; use '-' para ler do stdin."),
     fmt: Format = typer.Option(Format.console, "--format", "-f", help="Formato de saída."),
+    output: Path | None = typer.Option(
+        None, "--output", "-o", help="Grava o laudo neste arquivo (exige --format json)."
+    ),
     now: int | None = typer.Option(None, "--now", help="Epoch a usar como 'agora' (para testes)."),
     fail_on: FailOn = typer.Option(FailOn.high, "--fail-on", help="Severidade que faz sair com 1."),
     claims_completas: bool = typer.Option(
@@ -151,6 +154,8 @@ def inspect(
 ) -> None:
     """Decodifica e roda todas as checagens passivas de segurança."""
     token = _resolve_token(token)
+    if output is not None and fmt is not Format.json:
+        raise typer.BadParameter("--output exige --format json (o console é para o terminal).")
     if claims_completas:
         err.print(f"[yellow]{_AVISO_CLAIMS_COMPLETAS}[/]")
     try:
@@ -160,11 +165,25 @@ def inspect(
         raise typer.Exit(2) from exc
     redact = not claims_completas
     if fmt is Format.json:
-        typer.echo(to_json(result, redact=redact))
+        _emit(to_json(result, redact=redact), output)
     else:
         console_report.render(result, redact=redact)
     top = result.max_severity()
     raise typer.Exit(1 if top is not None and top.rank >= fail_on.rank() else 0)
+
+
+def _emit(texto: str, output: Path | None) -> None:
+    """Escreve o laudo no arquivo (`-o`) ou no stdout.
+
+    Gravar direto em UTF-8 com `-o` evita a armadilha do operador `>` do PowerShell, que
+    recodifica a saída linha a linha (lento e sujeito a mojibake em Windows). É também a
+    forma de canalizar o JSON para `github/codeql-action/upload-sarif` num passo de CI.
+    """
+    if output is None:
+        typer.echo(texto)
+    else:
+        output.write_text(texto, encoding="utf-8")
+        err.print(f"[green]laudo salvo em[/] {output}")
 
 
 def _read_source(path: Path | None) -> str:
@@ -183,6 +202,9 @@ def batch(
         None, help="Arquivo com um token por linha; '-' ou omitir lê do stdin."
     ),
     fmt: Format = typer.Option(Format.console, "--format", "-f", help="Formato de saída."),
+    output: Path | None = typer.Option(
+        None, "--output", "-o", help="Grava o laudo neste arquivo (exige --format json)."
+    ),
     now: int | None = typer.Option(None, "--now", help="Epoch a usar como 'agora' (para testes)."),
     fail_on: FailOn = typer.Option(
         FailOn.high, "--fail-on", help="Pior severidade do lote que faz sair com 1."
@@ -207,6 +229,8 @@ def batch(
     e não derruba o build. O 2 fica reservado a erro de uso (opção inválida,
     arquivo ilegível), como manda a convenção do Click.
     """
+    if output is not None and fmt is not Format.json:
+        raise typer.BadParameter("--output exige --format json (o console é para o terminal).")
     text = _read_source(path)
     if claims_completas:
         err.print(f"[yellow]{_AVISO_CLAIMS_COMPLETAS}[/]")
@@ -216,7 +240,7 @@ def batch(
         raise typer.Exit(0)
     redact = not claims_completas
     if fmt is Format.json:
-        typer.echo(batch_to_json(outcomes, redact=redact))
+        _emit(batch_to_json(outcomes, redact=redact), output)
     else:
         console_report.render_batch(outcomes, redact=redact)
     summary = summarize(outcomes)

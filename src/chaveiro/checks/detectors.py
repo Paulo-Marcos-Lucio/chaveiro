@@ -132,6 +132,20 @@ def check_header(token: DecodedToken) -> list[Finding]:
         out.append(make_finding("header-x5c", "Cadeia de certificados embutida ('x5c')."))
     if "crit" in header:
         out.append(make_finding("header-crit", f"Extensões críticas: {header['crit']!r}."))
+    if "zip" in header:
+        # O token que chega aqui é sempre um JWS compacto de 3 segmentos (o parser rejeita
+        # o resto). 'zip' só é válido em JWE (RFC 7516); num JWS é violação de RFC e o vetor
+        # de DoS por descompressão pré-verificação (Apache James descomprimia antes de checar
+        # a assinatura). Detectável offline, sem tocar a rede, só lendo o header.
+        out.append(
+            make_finding(
+                "header-zip-jws",
+                "O cabeçalho declara 'zip' (compressão) num token de 3 segmentos (JWS). "
+                "'zip' só é válido em JWE; aqui viola o RFC 7515 e abre DoS por descompressão "
+                "se o verificador descomprime antes de checar a assinatura.",
+                evidence=f"zip={header['zip']!r}",
+            )
+        )
     kid = header.get("kid")
     if isinstance(kid, str) and any(token_ in kid for token_ in _KID_DANGEROUS):
         out.append(

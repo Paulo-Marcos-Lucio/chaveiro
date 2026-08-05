@@ -32,6 +32,7 @@ _CASOS_POSITIVOS: list[tuple[str, dict, dict]] = [
     ("header-jwk", {"alg": "HS256", "jwk": {"kty": "oct"}}, {"sub": "a"}),
     ("header-x5c", {"alg": "HS256", "x5c": ["MIIB..."]}, {"sub": "a"}),
     ("header-crit", {"alg": "HS256", "crit": ["exp"]}, {"sub": "a"}),
+    ("header-zip-jws", {"alg": "HS256", "zip": "DEF"}, {"sub": "a"}),
     ("header-kid-injection", {"alg": "HS256", "kid": "../../etc/passwd"}, {"sub": "a"}),
     ("header-cty-nested", {"alg": "HS256", "cty": "JWT"}, {"sub": "a"}),
     ("claim-no-exp", {"alg": "HS256"}, {"iat": NOW, "aud": "x", "iss": "y"}),
@@ -85,6 +86,8 @@ _CASOS_NEGATIVOS: list[tuple[str, dict, dict]] = [
     ("header-kid-injection", {"alg": "HS256", "kid": "chave-2024-rotacionada"}, {"sub": "a"}),
     # vida curta não é vida longa.
     ("claim-long-lifetime", {"alg": "HS256"}, {"iat": NOW, "exp": NOW + 300}),
+    # token sem 'zip' não dispara o achado de compressão em JWS.
+    ("header-zip-jws", {"alg": "HS256"}, {"sub": "a"}),
 ]
 
 

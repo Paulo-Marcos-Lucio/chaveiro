@@ -33,6 +33,23 @@ def test_inspect_none_token_json_exit1() -> None:
     assert any(f["id"] == "alg-none" for f in doc["findings"])
 
 
+def test_inspect_output_grava_arquivo(tmp_path: Path) -> None:
+    token = raw_token({"alg": "none"}, {"sub": "admin"})
+    saida = tmp_path / "laudo.json"
+    result = runner.invoke(
+        app, ["inspect", token, "-f", "json", "-o", str(saida), "--now", str(NOW)]
+    )
+    assert result.exit_code == 1
+    doc = json.loads(saida.read_text(encoding="utf-8"))
+    assert any(f["id"] == "alg-none" for f in doc["findings"])
+
+
+def test_output_com_console_e_erro_de_uso(tmp_path: Path) -> None:
+    token = raw_token({"alg": "none"}, {"sub": "admin"})
+    result = runner.invoke(app, ["inspect", token, "-o", str(tmp_path / "x.json")])
+    assert result.exit_code == 2  # --output exige --format json
+
+
 def test_crack_finds_weak_secret() -> None:
     token = hs_token({"sub": "a"}, secret="secret")
     result = runner.invoke(app, ["crack", token])

@@ -180,6 +180,17 @@ CATALOG: dict[str, CheckMeta] = {
             None,
         ),
         CheckMeta(
+            "header-zip-jws",
+            "'zip' (compressão) num JWS de 3 segmentos",
+            Severity.HIGH,
+            "O parâmetro 'zip' só é válido em JWE (RFC 7516); num JWS (token de 3 segmentos) viola o "
+            "RFC 7515. Bibliotecas que descomprimem o payload ANTES de verificar a assinatura ficam "
+            "expostas a DoS por descompressão sem conhecer chave nenhuma (o caso do Apache James). "
+            "Rejeite tokens com 'zip' fora de JWE e limite o tamanho do payload descomprimido.",
+            "A06:2025 Insecure Design",
+            "CWE-409",
+        ),
+        CheckMeta(
             "header-cty-nested",
             "JWT aninhado declarado ('cty: JWT')",
             Severity.MEDIUM,
