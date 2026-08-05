@@ -241,18 +241,24 @@ entrego ao cliente junto do diagnóstico, não um drop-in.
 O Chaveiro resolve uma pergunta específica: *este token seria aceito por um verificador mal configurado?* — e responde antes que um atacante faça a mesma pergunta. O dado percorre um pipeline curto: você passa um token (ou um arquivo/log de tokens), ele é **decodificado sem verificar assinatura**, os detectores varrem cabeçalho, algoritmo, claims e payload, e cada fraqueza vira um `Finding` já classificado por **OWASP 2025 / CWE**. No fim sai um relatório — no **console** (rich) para ler, ou em **JSON** (`schema suite-appsec/1`) para pipeline. A auditoria é **100% passiva**, não toca a rede; os comandos de ataque (`crack`/`forge`) são separados e exigem autorização.
 
 ```mermaid
-flowchart LR
-    IN["Token JWT/JWS · ou arquivo/log (batch)"] --> CLI["cli.py — CLI (typer)"]
-    CLI --> AUD["audit.py — orquestração"]
-    AUD --> DEC["core/jwt — decode base64url (não verifica assinatura)"]
-    DEC --> CHK["checks/detectors — alg · header · claims · payload · nested · CPF"]
-    CHK --> CAT["checks/catalog — taxonomia OWASP 2025 / CWE"]
-    CAT --> FND["Finding (imutável)"]
-    FND --> RPT["report/ — renderização"]
-    RPT --> CON["console (rich)"]
-    RPT --> JSN["JSON (schema suite-appsec/1)"]
-    CLI --> ATK["attacks/ — crack · confusion (PoC, autorizado)"]
-    FND -.->|correção de referência| REF["reference/ — referência mínima segura"]
+flowchart TD
+    A["<b>cli.py</b><br/>Typer · token ou arquivo"] --> AUD["<b>audit.py</b><br/>orquestra a auditoria"]
+    AUD --> DEC["<b>core/jwt.py</b><br/>decodifica sem verificar"]
+    DEC --> CHK["<b>checks/detectors.py</b><br/>alg · header · claims · payload"]
+    CHK --> CAT["<b>checks/catalog.py</b><br/>taxonomia OWASP 2025 · CWE"]
+    CAT --> FND["<b>core/models.py</b><br/>Finding imutável"]
+    FND --> RPT["<b>report/</b><br/>renderização · redação de PII"]
+    RPT --> OUT
+    A --> ATK["<b>attacks/</b><br/>crack · confusion (PoC autorizado)"]
+    FND -.->|correção de referência| REF["<b>reference/</b><br/>validação mínima segura"]
+    subgraph OUT [" Formatos de saída "]
+        direction LR
+        CON["console (rich)"] ~~~ JS["JSON · suite-appsec/1"]
+    end
+    classDef nucleo fill:#0e2a24,stroke:#3fb79e,stroke-width:2px,color:#e7ede9;
+    classDef saida fill:#241d0f,stroke:#d6a94e,color:#f5ecd9;
+    class A,AUD,DEC,CHK,CAT,FND,RPT nucleo;
+    class CON,JS,ATK,REF saida;
 ```
 
 ```
