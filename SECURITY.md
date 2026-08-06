@@ -1,3 +1,5 @@
+<p align="center"><a href="SECURITY.en.md"><img src="https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/btn-lang-en.svg" alt="Read this document in English" width="300"/></a></p>
+
 # Política de Segurança
 
 ## Versões suportadas
