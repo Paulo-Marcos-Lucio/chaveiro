@@ -12,13 +12,13 @@
 *Decodes, audits, and attacks (with authorization) JWT tokens: `alg:none`, algorithm confusion (RS→HS), weak HMAC secret, `kid`/`jku`/`x5u` as an SSRF/injection vector, and claims validation. Includes a **minimal secure reference** for validation — because finding the flaw and showing how to fix it is the complete service.*
 
 [![CI](https://github.com/Paulo-Marcos-Lucio/chaveiro/actions/workflows/ci.yml/badge.svg)](https://github.com/Paulo-Marcos-Lucio/chaveiro/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Ruff](https://img.shields.io/badge/lint-ruff-261230.svg)](https://github.com/astral-sh/ruff)
-[![Checked with mypy](https://img.shields.io/badge/mypy-strict-2A6DB2.svg)](https://mypy-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-191%20passing-brightgreen.svg)](#-engineering-quality--method)
-[![Coverage](https://img.shields.io/badge/coverage-95%25-green.svg)](#-engineering-quality--method)
-[![OWASP](https://img.shields.io/badge/OWASP_2025-A07%2FA04-000000.svg)](https://owasp.org/Top10/2025/)
+[![Python 3.10+](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-python.svg)](https://www.python.org/)
+[![MIT License](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-license.svg)](LICENSE)
+[![Ruff lint](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-ruff.svg)](https://github.com/astral-sh/ruff)
+[![Checked with mypy](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-mypy.svg)](https://mypy-lang.org/)
+[![191 tests passing](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-tests.svg)](#-engineering-quality--method)
+[![95% coverage](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-coverage.svg)](#-engineering-quality--method)
+[![OWASP 2025 · A07/A04](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-owasp.svg)](https://owasp.org/Top10/2025/)
 
 </div>
 
