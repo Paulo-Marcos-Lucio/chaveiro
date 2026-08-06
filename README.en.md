@@ -155,7 +155,7 @@ The JSON envelope also carries `commit`, `ruleset_hash` (sha256 of the checks ca
 
 ### Configuration — the options that matter most
 
-None of this is mandatory: Chaveiro runs on the defaults. Change something only when the context calls for it. (`chaveiro <comando> --help` lists everything.)
+None of this is mandatory: Chaveiro runs on the defaults. Change something only when the context calls for it. (`chaveiro <command> --help` lists everything.)
 
 | Option | Where | Default | When to change |
 | --- | --- | --- | --- |
@@ -165,7 +165,7 @@ None of this is mandatory: Chaveiro runs on the defaults. Change something only 
 | `--strict` | `batch` | off | when a malformed line **should** bring down the build (by default it's just log noise) |
 | `-w, --wordlist` | `crack` | — | add your wordlist (e.g., `rockyou.txt`) to the built-in weak-secret list |
 | `--no-defaults` | `crack` | off | test **only** your wordlist, without the built-in list |
-| `--set chave=valor` | `forge`, `forge-confusion` | — | edit claims in the PoC (repeatable: `--set sub=admin --set role=admin`) |
+| `--set key=value` | `forge`, `forge-confusion` | — | edit claims in the PoC (repeatable: `--set sub=admin --set role=admin`) |
 | `--alg` | `forge`, `forge-confusion` | `HS256` | forge with a different HMAC (`HS384`/`HS512`) |
 | `CHAVEIRO_COMMIT` (env) | all | `git rev-parse HEAD` | pin the provenance SHA when running from an installed package (no `.git`) |
 
@@ -206,8 +206,8 @@ It is a **minimal secure reference**, not a complete, production-ready verifier.
 
 <div align="center">
 
-[![Packages and pricing](https://img.shields.io/badge/Pacotes_e_valores-paulo--marcos--lucio.github.io-0f766e?style=for-the-badge)](https://paulo-marcos-lucio.github.io)
-[![Talk on LinkedIn](https://img.shields.io/badge/LinkedIn-Falar_agora-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/paulo-marcos-a07379174/)
+[![Packages and pricing](https://img.shields.io/badge/Packages_and_pricing-paulo--marcos--lucio.github.io-0f766e?style=for-the-badge)](https://paulo-marcos-lucio.github.io)
+[![Talk on LinkedIn](https://img.shields.io/badge/LinkedIn-Talk_now-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/paulo-marcos-a07379174/)
 
 </div>
 
