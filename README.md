@@ -1,4 +1,4 @@
-<p align="right"><a href="README.en.md">🇺🇸 Read in English</a></p>
+<p align="center"><a href="README.en.md"><img src="https://img.shields.io/badge/🇺🇸-READ_IN_ENGLISH-B22234?style=for-the-badge&labelColor=3C3B6E" alt="Read this document in English"/></a></p>
 
 <a href="https://paulo-marcos-lucio.github.io"><img src="https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/banner-abismo-v2.svg" alt="Chaveiro — as chaves que flutuam no escuro: auditor de segurança de tokens JWT/JWS" width="100%"/></a>
 
