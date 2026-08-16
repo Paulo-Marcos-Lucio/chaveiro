@@ -95,6 +95,12 @@ def _render_token(result: AuditResult, console: Console, *, redact: bool = False
 
 
 def _claims_with_readable_times(result: AuditResult, *, redact: bool = False) -> str:
+    if result.token.kind == "jwe":
+        return (
+            "<claims cifradas — JWE (RFC 7516): o Chaveiro audita o cabeçalho protegido "
+            "sem decifrar nada; payload vazio aqui não é 'sem claims', é 'claims ilegíveis "
+            "sem a chave'>"
+        )
     if result.token.nested is not None:
         return (
             "<JWT aninhado: o payload desta casca é outro JWS compacto>\n"

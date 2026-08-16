@@ -3,10 +3,10 @@ from __future__ import annotations
 import pytest
 
 from chaveiro.checks.catalog import CATALOG
-from chaveiro.checks.detectors import _is_sensitive_key, run_all
+from chaveiro.checks.detectors import _JWE_P2C_MAX, _is_sensitive_key, run_all
 from chaveiro.core.jwt import decode
 from chaveiro.core.models import Severity
-from tests.conftest import hs_token, raw_token
+from tests.conftest import hs_token, jwe_token, raw_token
 
 NOW = 1_800_000_000
 _INNER_JWT = hs_token({"sub": "admin"}, secret="k")
@@ -47,12 +47,37 @@ _CASOS_POSITIVOS: list[tuple[str, dict, dict]] = [
     ("payload-sensitive", {"alg": "HS256"}, {"password": "hunter2"}),
 ]
 
+# JWE (RFC 7516): 5 segmentos, não 3 — `payload=None` é o sinal para montar via
+# `jwe_token(header)` em vez de `raw_token(header, payload)` (ver `_token_for`).
+_CASOS_POSITIVOS_JWE: list[tuple[str, dict, None]] = [
+    ("jwe-alg-rsa15", {"alg": "RSA1_5", "enc": "A128CBC-HS256"}, None),
+    ("jwe-alg-unknown", {"alg": "ZZ-nao-existe", "enc": "A256GCM"}, None),
+    ("jwe-enc-unknown", {"alg": "dir", "enc": "ZZ-nao-existe"}, None),
+    (
+        "jwe-p2c-abusive",
+        {
+            "alg": "PBES2-HS256+A128KW",
+            "enc": "A128CBC-HS256",
+            "p2c": _JWE_P2C_MAX + 1,
+            "p2s": "c2FsdA",
+        },
+        None,
+    ),
+    ("jwe-zip-dos", {"alg": "dir", "enc": "A256GCM", "zip": "DEF"}, None),
+]
+
+
+def _token_for(header: dict, payload: dict | None) -> str:
+    return jwe_token(header) if payload is None else raw_token(header, payload)
+
 
 @pytest.mark.parametrize(
-    "check_id, header, payload", _CASOS_POSITIVOS, ids=[c[0] for c in _CASOS_POSITIVOS]
+    "check_id, header, payload",
+    [*_CASOS_POSITIVOS, *_CASOS_POSITIVOS_JWE],
+    ids=[c[0] for c in [*_CASOS_POSITIVOS, *_CASOS_POSITIVOS_JWE]],
 )
-def test_cada_checagem_dispara(check_id: str, header: dict, payload: dict) -> None:
-    assert check_id in _ids(raw_token(header, payload))
+def test_cada_checagem_dispara(check_id: str, header: dict, payload: dict | None) -> None:
+    assert check_id in _ids(_token_for(header, payload))
 
 
 def test_toda_checagem_do_catalogo_tem_caso_positivo() -> None:
@@ -61,7 +86,7 @@ def test_toda_checagem_do_catalogo_tem_caso_positivo() -> None:
     Transforma disciplina humana em invariante — uma checagem nova entra
     vermelha até ganhar sua tupla em `_CASOS_POSITIVOS`.
     """
-    testados = {cid for cid, _, _ in _CASOS_POSITIVOS}
+    testados = {cid for cid, _, _ in [*_CASOS_POSITIVOS, *_CASOS_POSITIVOS_JWE]}
     assert set(CATALOG) - testados == set()
 
 

@@ -64,6 +64,7 @@ def to_document(
         "version": __version__,
         "owasp_edition": OWASP_EDITION,
         "token": {
+            "kind": result.token.kind,
             "alg": result.token.alg,
             "header": result.token.header,
             "claims": claims,

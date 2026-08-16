@@ -30,7 +30,7 @@ _RANK: dict[Severity, int] = {
 
 @dataclass(frozen=True)
 class DecodedToken:
-    """Um JWS/JWT decodificado — **sem** verificação de assinatura."""
+    """Um JWS ou JWE decodificado — **sem** verificar assinatura nem decifrar nada."""
 
     raw: str
     header: dict[str, Any]
@@ -41,6 +41,12 @@ class DecodedToken:
     # outro JWS compacto em vez de um objeto JSON. Nesse caso `payload` fica
     # vazio — a casca não tem claims próprias.
     nested: str | None = None
+    # "jws" (3 segmentos, RFC 7515) ou "jwe" (5 segmentos, RFC 7516). Num JWE só
+    # o cabeçalho protegido é legível sem a chave — `payload` fica vazio (não é
+    # "sem claims", é "claims cifradas") e `header['alg']` muda de sentido: não é
+    # o algoritmo de ASSINATURA, é o de GERENCIAMENTO DE CHAVE. As checagens de
+    # JWS (`check_alg`, `check_claims`, ...) não se aplicam a um `kind="jwe"`.
+    kind: str = "jws"
 
     @property
     def alg(self) -> str:
@@ -49,7 +55,7 @@ class DecodedToken:
 
     @property
     def is_unsecured(self) -> bool:
-        return self.alg.lower() == "none"
+        return self.kind == "jws" and self.alg.lower() == "none"
 
 
 @dataclass(frozen=True)

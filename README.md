@@ -57,6 +57,22 @@ O Chaveiro cobre esses vetores dos dois lados: **audita** um token, **prova** a 
 
 > A coluna cita o código do **OWASP Top 10:2025** (edição vigente, publicada em 2025-11-06). O JSON traz `owasp_edition: "2025"` e o rótulo completo em cada achado.
 
+### JWE (RFC 7516) — cabeçalho protegido, sem decifrar nada
+
+Um JWE tem 5 segmentos, não 3. Sem a chave, chave-encriptada/IV/ciphertext/tag
+continuam opacos por definição — a auditoria é só sobre o **cabeçalho
+protegido**, que é a única parte legível. `alg` aqui é gerenciamento de
+**chave**, não assinatura; `header['alg'] not in {HS256, RS256, ...}` daria
+falso-positivo em todo `RSA-OAEP`/`ECDH-ES` legítimo, então o JWE tem seu
+próprio conjunto de checagens, separado do JWS.
+
+| Checagem | Risco | Severidade | OWASP 2025 / CWE |
+| --- | --- | --- | --- |
+| `jwe-alg-rsa15` | Gerenciamento de chave `RSA1_5` — sem OAEP, oráculo de padding (Bleichenbacher) | 🟠 Alta | A04 · CWE-780 |
+| `jwe-alg-unknown` / `jwe-enc-unknown` | `alg`/`enc` fora da allowlist — verificação ambígua | 🟡 Média | A04 · CWE-327 |
+| `jwe-p2c-abusive` | `p2c` (iterações PBES2) acima do teto — o emissor escolhe, o verificador paga antes de autenticar (Billion Hash) | 🟠 Alta | A06 · CWE-400 |
+| `jwe-zip-dos` | `zip: DEF` comprime antes de cifrar — descompressão sem teto de tamanho no verificador | 🟡 Média | A06 · CWE-409 |
+
 ---
 
 ## 📊 Prova de campo
