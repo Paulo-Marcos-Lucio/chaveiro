@@ -94,17 +94,22 @@ def b64url_encode(data: bytes) -> str:
 
 
 def decode(token: str) -> DecodedToken:
-    """Decodifica um JWS compacto em suas partes, **sem verificar assinatura**.
+    """Decodifica um JWS ou JWE compacto em suas partes, **sem verificar/decifrar**.
 
-    Cobre as duas formas do RFC 7519: o JWT comum (payload = objeto JSON) e o
-    **JWT aninhado** (§5.2), cujo payload é outro JWS compacto. No aninhado,
+    Um JWS (RFC 7515) tem 3 segmentos; um JWE (RFC 7516) tem 5. Cobre as duas
+    formas do JWS previstas no RFC 7519: o JWT comum (payload = objeto JSON) e
+    o **JWT aninhado** (§5.2), cujo payload é outro JWS compacto. No aninhado,
     ``payload`` fica vazio — a casca não tem claims próprias — e ``nested``
     guarda o token interno, que precisa ser auditado à parte.
     """
     token = token.strip()
     parts = token.split(".")
+    if len(parts) == 5:
+        return _decode_jwe(token, parts)
     if len(parts) != 3:
-        raise JWTError(f"esperados 3 segmentos separados por ponto, encontrei {len(parts)}")
+        raise JWTError(
+            f"esperados 3 segmentos (JWS) ou 5 (JWE) separados por ponto, encontrei {len(parts)}"
+        )
     header_b64, payload_b64, sig_b64 = parts
     header = _decode_json(header_b64, "header")
     payload, nested = _decode_payload(payload_b64)
@@ -117,6 +122,31 @@ def decode(token: str) -> DecodedToken:
         signature=signature,
         signing_input=signing_input,
         nested=nested,
+        kind="jws",
+    )
+
+
+def _decode_jwe(token: str, parts: list[str]) -> DecodedToken:
+    """Decodifica um JWE compacto (RFC 7516 §3.3) — só o cabeçalho é legível.
+
+    Sem a chave de descriptografia, chave-encriptada/IV/ciphertext/tag continuam
+    opacos por definição — a auditoria passiva é só sobre o cabeçalho protegido
+    (primeiro segmento), única parte em JSON. Os outros quatro segmentos só têm
+    o alfabeto base64url conferido (um deles, a chave encriptada, é vazio de
+    propósito em modos como 'alg: dir' — RFC 7516 §5.1 passo 4).
+    """
+    header_b64, *opaco = parts
+    header = _decode_json(header_b64, "cabeçalho protegido")
+    for segmento in opaco:
+        b64url_decode(segmento)
+    return DecodedToken(
+        raw=token,
+        header=header,
+        payload={},
+        signature=b"",
+        signing_input=b"",
+        nested=None,
+        kind="jwe",
     )
 
 

@@ -27,6 +27,22 @@ def raw_token(header: dict, payload: dict, signature: bytes = b"") -> str:
     return f"{h}.{p}.{b64url_encode(signature)}"
 
 
+def jwe_token(header: dict) -> str:
+    """Monta um JWE compacto (RFC 7516 §3.3) com cabeçalho controlado.
+
+    Os quatro segmentos opacos (chave encriptada/IV/ciphertext/tag) não
+    precisam ser cifra de verdade para as checagens de cabeçalho — o Chaveiro
+    audita passivamente e nunca decifra. Ficam com bytes arbitrários, só para
+    que o token tenha a forma de um JWE de verdade (5 segmentos base64url).
+    """
+    h = b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    encrypted_key = b64url_encode(b"chave-encriptada-fake")
+    iv = b64url_encode(b"iv-de-16-bytes-x")
+    ciphertext = b64url_encode(b"ciphertext-fake")
+    tag = b64url_encode(b"tag-de-16-bytesx")
+    return f"{h}.{encrypted_key}.{iv}.{ciphertext}.{tag}"
+
+
 def hs_token(
     payload: dict, secret: str = "secret", alg: str = "HS256", **header_extra: object
 ) -> str:

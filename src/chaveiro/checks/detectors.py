@@ -66,8 +66,38 @@ _CPF = re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b|\b\d{11}\b")
 # "application/" pode ser omitido — "JWT" marca um token aninhado.
 _CTY_NESTED = {"jwt", "application/jwt"}
 
+# --- JWE (RFC 7516) — vocabulário do cabeçalho protegido, distinto do JWS ---
+# 'alg' aqui é gerenciamento de CHAVE, não assinatura; misturar com _KNOWN_ALGS
+# (vocabulário de JWS) daria falso-positivo em todo RSA-OAEP/ECDH-ES legítimo.
+_JWE_ALG_ALLOWLIST = {
+    "RSA-OAEP", "RSA-OAEP-256",
+    "A128KW", "A192KW", "A256KW",
+    "A128GCMKW", "A192GCMKW", "A256GCMKW",
+    "dir",
+    "ECDH-ES", "ECDH-ES+A128KW", "ECDH-ES+A192KW", "ECDH-ES+A256KW",
+    "PBES2-HS256+A128KW", "PBES2-HS384+A192KW", "PBES2-HS512+A256KW",
+}  # fmt: skip
+_JWE_ENC_ALLOWLIST = {
+    "A128CBC-HS256", "A192CBC-HS384", "A256CBC-HS512",
+    "A128GCM", "A192GCM", "A256GCM",
+}  # fmt: skip
+_JWE_ALG_RSA1_5 = "RSA1_5"
+_JWE_PBES2_ALGS = {"PBES2-HS256+A128KW", "PBES2-HS384+A192KW", "PBES2-HS512+A256KW"}
+# Teto de 'p2c' (iterações do PBES2, RFC 7518 §4.8.1.2). O valor é escolhido por
+# quem EMITE o token e pago por quem VERIFICA em toda tentativa de decifrar,
+# antes de qualquer autenticação — o oposto de hash de senha em repouso, que
+# roda uma vez no cadastro. Uso legítimo fixa um número da ordem de milhares;
+# nada com latência de verificação síncrona justifica mais que isso. Acima do
+# teto é o mecanismo exato do ataque de "Billion Hash": o emissor infla 'p2c' e
+# o verificador queima CPU tentando decifrar tokens hostis.
+_JWE_P2C_MAX = 100_000
+
 
 def run_all(token: DecodedToken, now: int) -> list[Finding]:
+    if token.kind == "jwe":
+        # As checagens abaixo são vocabulário de JWS (alg de assinatura, claims
+        # em claro) — não fazem sentido sobre um cabeçalho de JWE.
+        return check_jwe_header(token)
     findings: list[Finding] = []
     findings += check_alg(token)
     findings += check_header(token)
@@ -75,6 +105,69 @@ def run_all(token: DecodedToken, now: int) -> list[Finding]:
     findings += check_claims(token, now)
     findings += check_payload(token)
     return findings
+
+
+def check_jwe_header(token: DecodedToken) -> list[Finding]:
+    """Checagens passivas sobre o cabeçalho protegido de um JWE — sem decifrar nada.
+
+    Cobre os três vetores auditáveis sem a chave: algoritmo de gerenciamento de
+    chave (`alg`) e de conteúdo (`enc`) fora da allowlist, iterações de PBES2
+    (`p2c`) abusivas e `zip: DEF` (descompressão sem controle de tamanho).
+    """
+    out: list[Finding] = []
+    header = token.header
+    alg = header.get("alg")
+    enc = header.get("enc")
+
+    if isinstance(alg, str):
+        if alg == _JWE_ALG_RSA1_5:
+            out.append(
+                make_finding(
+                    "jwe-alg-rsa15",
+                    "Gerenciamento de chave 'RSA1_5' (RSAES-PKCS1-v1_5, sem OAEP).",
+                    evidence=f"alg={alg!r}",
+                )
+            )
+        elif alg not in _JWE_ALG_ALLOWLIST:
+            out.append(
+                make_finding(
+                    "jwe-alg-unknown",
+                    f"Algoritmo de gerenciamento de chave não reconhecido: {alg!r}.",
+                    evidence=alg,
+                )
+            )
+        if alg in _JWE_PBES2_ALGS:
+            p2c = header.get("p2c")
+            if isinstance(p2c, int) and not isinstance(p2c, bool) and p2c > _JWE_P2C_MAX:
+                out.append(
+                    make_finding(
+                        "jwe-p2c-abusive",
+                        f"'p2c' = {p2c} iterações, acima do teto de {_JWE_P2C_MAX}.",
+                        evidence=f"alg={alg} p2c={p2c}",
+                    )
+                )
+
+    if isinstance(enc, str) and enc not in _JWE_ENC_ALLOWLIST:
+        out.append(
+            make_finding(
+                "jwe-enc-unknown",
+                f"Algoritmo de conteúdo (enc) não reconhecido: {enc!r}.",
+                evidence=enc,
+            )
+        )
+
+    if header.get("zip") == "DEF":
+        out.append(
+            make_finding(
+                "jwe-zip-dos",
+                "O cabeçalho declara 'zip: DEF' — o plaintext é comprimido antes de cifrar; ao "
+                "decifrar, quem verifica descomprime o conteúdo sem saber de antemão o tamanho "
+                "final, o que abre exaustão de memória/CPU (zip bomb) sem precisar de chave "
+                "nenhuma.",
+                evidence="zip=DEF",
+            )
+        )
+    return out
 
 
 def check_alg(token: DecodedToken) -> list[Finding]:
@@ -133,10 +226,12 @@ def check_header(token: DecodedToken) -> list[Finding]:
     if "crit" in header:
         out.append(make_finding("header-crit", f"Extensões críticas: {header['crit']!r}."))
     if "zip" in header:
-        # O token que chega aqui é sempre um JWS compacto de 3 segmentos (o parser rejeita
-        # o resto). 'zip' só é válido em JWE (RFC 7516); num JWS é violação de RFC e o vetor
-        # de DoS por descompressão pré-verificação (Apache James descomprimia antes de checar
-        # a assinatura). Detectável offline, sem tocar a rede, só lendo o header.
+        # `run_all` só chama `check_header` para `kind == "jws"` — um token de 5
+        # segmentos (JWE) cai em `check_jwe_header`, onde 'zip' é válido (RFC
+        # 7516) e vira o achado `jwe-zip-dos`, não este. Aqui, 'zip' num JWS é
+        # violação do RFC 7515 e o vetor de DoS por descompressão
+        # pré-verificação (Apache James descomprimia antes de checar a
+        # assinatura). Detectável offline, sem tocar a rede, só lendo o header.
         out.append(
             make_finding(
                 "header-zip-jws",

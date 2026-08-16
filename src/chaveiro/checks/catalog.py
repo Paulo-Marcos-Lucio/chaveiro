@@ -218,6 +218,54 @@ CATALOG: dict[str, CheckMeta] = {
             "A04:2025 Cryptographic Failures",
             "CWE-522",
         ),
+        # --- JWE (RFC 7516) — cabeçalho protegido, sem decifrar nada ---------
+        CheckMeta(
+            "jwe-alg-rsa15",
+            "Gerenciamento de chave 'RSA1_5' (sem OAEP)",
+            Severity.HIGH,
+            "Migre para 'RSA-OAEP' ou 'RSA-OAEP-256'. RSAES-PKCS1-v1_5 é o mecanismo do ataque de "
+            "oráculo de padding de Bleichenbacher — a RFC 8725 (JOSE BCP) recomenda evitá-lo.",
+            "A04:2025 Cryptographic Failures",
+            "CWE-780",
+        ),
+        CheckMeta(
+            "jwe-alg-unknown",
+            "Algoritmo de gerenciamento de chave (alg) não reconhecido",
+            Severity.MEDIUM,
+            "Aceite apenas os algoritmos de gerenciamento de chave que seu sistema realmente usa "
+            "(allowlist) — um valor fora do esperado deixa a verificação ambígua.",
+            "A04:2025 Cryptographic Failures",
+            "CWE-327",
+        ),
+        CheckMeta(
+            "jwe-enc-unknown",
+            "Algoritmo de conteúdo (enc) não reconhecido",
+            Severity.MEDIUM,
+            "Aceite apenas os algoritmos de cifra de conteúdo que seu sistema realmente usa "
+            "(allowlist, ex. A256GCM) — um valor fora do esperado deixa a verificação ambígua.",
+            "A04:2025 Cryptographic Failures",
+            "CWE-327",
+        ),
+        CheckMeta(
+            "jwe-p2c-abusive",
+            "Contagem de iterações PBES2 ('p2c') abusiva",
+            Severity.HIGH,
+            "Rejeite tokens com 'p2c' acima de um teto fixo antes de tentar derivar a chave. "
+            "'p2c' é escolhido por quem EMITE o token e pago por quem VERIFICA a cada tentativa, "
+            "antes de qualquer autenticação — o mecanismo exato do ataque de 'Billion Hash'.",
+            "A06:2025 Insecure Design",
+            "CWE-400",
+        ),
+        CheckMeta(
+            "jwe-zip-dos",
+            "'zip: DEF' comprime o plaintext antes de cifrar",
+            Severity.MEDIUM,
+            "Limite o tamanho do conteúdo descomprimido no verificador. 'zip' comprime antes de "
+            "cifrar; ao decifrar, quem verifica descomprime sem saber de antemão o tamanho final — "
+            "brecha de exaustão de memória/CPU (zip bomb) sem precisar de chave nenhuma.",
+            "A06:2025 Insecure Design",
+            "CWE-409",
+        ),
     ]
 }
 
