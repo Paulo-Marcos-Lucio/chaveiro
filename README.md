@@ -47,11 +47,15 @@ O Chaveiro cobre esses vetores dos dois lados: **audita** um token, **prova** a 
 | `alg-hmac-advisory` | HS* → risco de segredo fraco e de confusão RS→HS | 🔵 Baixa | A04 · CWE-326 |
 | `header-jku` / `header-x5u` | Chave carregada de URL do token → **SSRF** / key injection | 🟠 Alta | A01 · CWE-918 |
 | `header-jwk` | Chave pública embutida (atacante fornece a própria) | 🟠 Alta | A07 · CWE-347 |
+| `header-x5c` | Cadeia de certificados embutida — só confie validando contra âncora própria | 🟡 Média | A07 · CWE-347 |
 | `header-kid-injection` | `kid` com `../`, `'`, `;` → path traversal / SQLi | 🟠 Alta | A05 · CWE-91 |
 | `header-zip-jws` | `zip` (compressão) num JWS — viola o RFC, abre DoS por descompressão (caso Apache James) | 🟠 Alta | A06 · CWE-409 |
+| `header-crit` | Extensão crítica (`crit`) declarada — confirme que o verificador a entende (informativo) | ⚪ Info | — |
 | `claim-no-exp` / `claim-long-lifetime` | Token eterno / longevo demais | 🟠/🟡 | A07 · CWE-613 |
+| `claim-expired` | Token expirado — um verificador correto o rejeitaria (informativo) | ⚪ Info | — |
 | `claim-malformed-time` | `exp`/`nbf` presente mas não numérico → verificador falha aberto | 🟡 Média | A07 · CWE-613 |
 | `claim-no-aud` / `claim-no-iss` / `claim-no-iat` | Falta amarração de destino/emissor | 🔵 Baixa | A07 · CWE-345 |
+| `claim-nbf-future` | Token ainda não válido, `nbf` no futuro (informativo) | ⚪ Info | — |
 | `header-cty-nested` / `payload-nested-jwt` | JWT aninhado (`cty: JWT` ou payload que **é** outro JWS) — valide as duas camadas | 🟡/🔵 | A07 · CWE-347 |
 | `payload-sensitive` | Segredo/PII no payload (JWT é base64, **não** cifrado) — varre também objetos aninhados e CPF | 🟡 Média | A04 · CWE-522 |
 
