@@ -65,6 +65,20 @@ _CPF = re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b|\b\d{11}\b")
 # RFC 7515 §4.1.10 / RFC 7519 §5.2: comparação case-insensitive e o prefixo
 # "application/" pode ser omitido — "JWT" marca um token aninhado.
 _CTY_NESTED = {"jwt", "application/jwt"}
+# RFC 9449 §4.2: a prova DPoP se anuncia por este 'typ' — comparação
+# case-insensitive e com strip, na mesma leniência já usada para 'alg: none'
+# (um verificador tolerante aceita 'DPoP+JWT'/'dpop+jwt ' como o mesmo typ).
+_DPOP_PROOF_TYP = "dpop+jwt"
+# RFC 9449 não fixa um teto para a idade do 'iat' da prova — a defesa contra
+# replay é o par (jti, iat): um jti nunca visto acompanhado de um 'iat' velho
+# ainda passaria num verificador que só deduplica jti sem checar idade. A
+# prática comum (bibliotecas de referência, Keycloak, Auth0) usa uma janela
+# curta; adotamos 300s (5 min) como teto — folga para relógio dessincronizado,
+# apertado o bastante para que uma prova capturada não sirva de novo depois.
+_DPOP_IAT_MAX_AGE_S = 300
+# RFC 7638: thumbprint de JWK é SHA-256 em base64url sem padding — sempre 43
+# caracteres do alfabeto -_.
+_JWK_THUMBPRINT_RE = re.compile(r"[A-Za-z0-9_-]{43}")
 
 
 def run_all(token: DecodedToken, now: int) -> list[Finding]:
@@ -74,6 +88,7 @@ def run_all(token: DecodedToken, now: int) -> list[Finding]:
     findings += check_nesting(token)
     findings += check_claims(token, now)
     findings += check_payload(token)
+    findings += check_dpop(token, now)
     return findings
 
 
@@ -275,6 +290,86 @@ def check_payload(token: DecodedToken) -> list[Finding]:
                 )
             )
     return out
+
+
+def check_dpop(token: DecodedToken, now: int) -> list[Finding]:
+    """Perfil DPoP (RFC 9449) — duas checagens independentes sobre papéis diferentes.
+
+    A **prova de posse** se reconhece pelo cabeçalho (`typ: dpop+jwt`) e carrega
+    `htm`/`htu`/`jti`/`iat` no payload. O **token vinculado** (tipicamente o
+    access token) não tem `typ` especial — ele se reconhece por carregar
+    `cnf.jkt` (RFC 9449 §6.1), o thumbprint da chave que assinou a prova.
+    Chaveiro audita um token de cada vez: não há como conferir que os dois
+    lados realmente combinam (isso exige o par), só que cada um, isolado, tem
+    a forma que o RFC exige.
+    """
+    out: list[Finding] = []
+    if _is_dpop_proof(token):
+        out += _check_dpop_proof_claims(token, now)
+    out += _check_dpop_bound_cnf(token)
+    return out
+
+
+def _is_dpop_proof(token: DecodedToken) -> bool:
+    typ = token.header.get("typ")
+    return isinstance(typ, str) and typ.strip().lower() == _DPOP_PROOF_TYP
+
+
+def _check_dpop_proof_claims(token: DecodedToken, now: int) -> list[Finding]:
+    out: list[Finding] = []
+    payload = token.payload
+    for claim, check_id in (
+        ("htm", "dpop-proof-missing-htm"),
+        ("htu", "dpop-proof-missing-htu"),
+        ("jti", "dpop-proof-missing-jti"),
+    ):
+        value = payload.get(claim)
+        if not isinstance(value, str) or value.strip() == "":
+            out.append(
+                make_finding(
+                    check_id,
+                    f"Prova DPoP ('typ: dpop+jwt') sem '{claim}'.",
+                    evidence=f"{claim}={value!r}" if claim in payload else f"{claim} ausente",
+                )
+            )
+    iat = _as_epoch(payload.get("iat"))
+    if iat is None:
+        out.append(
+            make_finding(
+                "dpop-proof-stale-iat",
+                "Prova DPoP sem 'iat' válido — sem ele não há como confinar a prova a uma "
+                "janela curta de tempo.",
+                evidence=f"iat={payload.get('iat')!r}",
+            )
+        )
+    elif abs(now - iat) > _DPOP_IAT_MAX_AGE_S:
+        out.append(
+            make_finding(
+                "dpop-proof-stale-iat",
+                f"'iat' fora da janela de frescor de {_DPOP_IAT_MAX_AGE_S}s "
+                f"(iat={iat}, agora={now}, diferença={abs(now - iat)}s).",
+                evidence=f"iat={iat}",
+            )
+        )
+    return out
+
+
+def _check_dpop_bound_cnf(token: DecodedToken) -> list[Finding]:
+    cnf = token.payload.get("cnf")
+    if not isinstance(cnf, dict) or "jkt" not in cnf:
+        return []
+    jkt = cnf["jkt"]
+    if not isinstance(jkt, str) or not _JWK_THUMBPRINT_RE.fullmatch(jkt):
+        return [
+            make_finding(
+                "dpop-cnf-jkt-malformed",
+                "'cnf.jkt' presente mas não é um thumbprint JWK válido (RFC 7638: SHA-256 em "
+                "base64url, 43 caracteres) — o token se declara vinculado por DPoP mas a "
+                "amarração não bate com nenhuma chave real.",
+                evidence=f"cnf.jkt={jkt!r}",
+            )
+        ]
+    return []
 
 
 def _walk(payload: dict[str, Any]) -> Iterator[tuple[str, str, Any]]:
