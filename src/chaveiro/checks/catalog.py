@@ -218,6 +218,53 @@ CATALOG: dict[str, CheckMeta] = {
             "A04:2025 Cryptographic Failures",
             "CWE-522",
         ),
+        CheckMeta(
+            "dpop-proof-missing-htm",
+            "Prova DPoP sem 'htm' (método HTTP)",
+            Severity.HIGH,
+            "RFC 9449 §4.2: sem 'htm' o verificador não amarra a prova ao método da requisição "
+            "— a mesma prova serve para GET e POST. Exija 'htm' e confira contra o método real.",
+            "A07:2025 Authentication Failures",
+            "CWE-294",
+        ),
+        CheckMeta(
+            "dpop-proof-missing-htu",
+            "Prova DPoP sem 'htu' (URL HTTP)",
+            Severity.HIGH,
+            "RFC 9449 §4.2: sem 'htu' a prova serve para qualquer endpoint — quebra a amarração "
+            "de destino que o DPoP existe para garantir. Exija 'htu' e confira contra a URL real "
+            "(sem query/fragmento).",
+            "A07:2025 Authentication Failures",
+            "CWE-294",
+        ),
+        CheckMeta(
+            "dpop-proof-missing-jti",
+            "Prova DPoP sem 'jti' (identificador único)",
+            Severity.HIGH,
+            "RFC 9449 §4.2/§11.1: sem 'jti' o servidor não detecta replay da mesma prova. Exija "
+            "'jti' e mantenha uma janela de deduplicação.",
+            "A07:2025 Authentication Failures",
+            "CWE-294",
+        ),
+        CheckMeta(
+            "dpop-proof-stale-iat",
+            "Prova DPoP com 'iat' ausente ou fora da janela de frescor",
+            Severity.MEDIUM,
+            "RFC 9449 §11.1: a janela curta de 'iat' é a defesa contra reenvio de uma prova "
+            "capturada. Rejeite provas sem 'iat' numérico ou fora de uma janela curta (minutos).",
+            "A07:2025 Authentication Failures",
+            "CWE-294",
+        ),
+        CheckMeta(
+            "dpop-cnf-jkt-malformed",
+            "'cnf.jkt' presente mas não é um thumbprint JWK válido",
+            Severity.MEDIUM,
+            "RFC 9449 §6.1 + RFC 7638: 'cnf.jkt' deve ser o thumbprint SHA-256 (base64url, 43 "
+            "caracteres) da chave pública da prova DPoP. Um valor malformado não amarra o token "
+            "a chave nenhuma — a proteção contra roubo de token é só decorativa.",
+            "A04:2025 Cryptographic Failures",
+            "CWE-345",
+        ),
     ]
 }
 

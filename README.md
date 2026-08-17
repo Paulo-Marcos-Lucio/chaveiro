@@ -54,6 +54,9 @@ O Chaveiro cobre esses vetores dos dois lados: **audita** um token, **prova** a 
 | `claim-no-aud` / `claim-no-iss` / `claim-no-iat` | Falta amarração de destino/emissor | 🔵 Baixa | A07 · CWE-345 |
 | `header-cty-nested` / `payload-nested-jwt` | JWT aninhado (`cty: JWT` ou payload que **é** outro JWS) — valide as duas camadas | 🟡/🔵 | A07 · CWE-347 |
 | `payload-sensitive` | Segredo/PII no payload (JWT é base64, **não** cifrado) — varre também objetos aninhados e CPF | 🟡 Média | A04 · CWE-522 |
+| `dpop-proof-missing-htm` / `-htu` / `-jti` | Prova DPoP (`typ: dpop+jwt`, RFC 9449) sem amarração de método/URL/replay | 🟠 Alta | A07 · CWE-294 |
+| `dpop-proof-stale-iat` | Prova DPoP com `iat` ausente ou fora da janela de frescor | 🟡 Média | A07 · CWE-294 |
+| `dpop-cnf-jkt-malformed` | `cnf.jkt` do token vinculado não é um thumbprint JWK válido (RFC 7638) | 🟡 Média | A04 · CWE-345 |
 
 > A coluna cita o código do **OWASP Top 10:2025** (edição vigente, publicada em 2025-11-06). O JSON traz `owasp_edition: "2025"` e o rótulo completo em cada achado.
 

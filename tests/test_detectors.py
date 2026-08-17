@@ -45,6 +45,27 @@ _CASOS_POSITIVOS: list[tuple[str, dict, dict]] = [
     ("claim-nbf-future", {"alg": "HS256"}, {"nbf": NOW + 3600, "exp": NOW + 7200}),
     ("payload-nested-jwt", {"alg": "HS256"}, {"assertion": _INNER_JWT}),
     ("payload-sensitive", {"alg": "HS256"}, {"password": "hunter2"}),
+    (
+        "dpop-proof-missing-htm",
+        {"alg": "ES256", "typ": "dpop+jwt"},
+        {"htu": "https://as.example/token", "jti": "abc", "iat": NOW},
+    ),
+    (
+        "dpop-proof-missing-htu",
+        {"alg": "ES256", "typ": "dpop+jwt"},
+        {"htm": "POST", "jti": "abc", "iat": NOW},
+    ),
+    (
+        "dpop-proof-missing-jti",
+        {"alg": "ES256", "typ": "dpop+jwt"},
+        {"htm": "POST", "htu": "https://as.example/token", "iat": NOW},
+    ),
+    (
+        "dpop-proof-stale-iat",
+        {"alg": "ES256", "typ": "dpop+jwt"},
+        {"htm": "POST", "htu": "https://as.example/token", "jti": "abc", "iat": NOW - 10_000},
+    ),
+    ("dpop-cnf-jkt-malformed", {"alg": "HS256"}, {"cnf": {"jkt": "curto-demais"}}),
 ]
 
 
@@ -88,6 +109,22 @@ _CASOS_NEGATIVOS: list[tuple[str, dict, dict]] = [
     ("claim-long-lifetime", {"alg": "HS256"}, {"iat": NOW, "exp": NOW + 300}),
     # token sem 'zip' não dispara o achado de compressão em JWS.
     ("header-zip-jws", {"alg": "HS256"}, {"sub": "a"}),
+    # prova DPoP completa e fresca não dispara nenhum achado do perfil.
+    (
+        "dpop-proof-missing-htm",
+        {"alg": "ES256", "typ": "dpop+jwt"},
+        {"htm": "POST", "htu": "https://as.example/token", "jti": "abc", "iat": NOW},
+    ),
+    (
+        "dpop-proof-stale-iat",
+        {"alg": "ES256", "typ": "dpop+jwt"},
+        {"htm": "POST", "htu": "https://as.example/token", "jti": "abc", "iat": NOW},
+    ),
+    # sem 'typ: dpop+jwt' o token não é auditado como prova — não é DPoP quem
+    # não se anuncia como DPoP, mesmo faltando os campos que uma prova exigiria.
+    ("dpop-proof-missing-htm", {"alg": "HS256"}, {"sub": "a"}),
+    # cnf.jkt bem formado (43 caracteres base64url) não dispara.
+    ("dpop-cnf-jkt-malformed", {"alg": "HS256"}, {"cnf": {"jkt": "a" * 43}}),
 ]
 
 
