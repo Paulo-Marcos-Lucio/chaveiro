@@ -6,9 +6,9 @@ funções em ``checks/*`` decidem *quando* emitir; os metadados vêm daqui.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from chaveiro.core.models import Finding, Severity
+from chaveiro.core.models import Confidence, Finding, FindingType, Severity
 
 # Edição do OWASP Top 10 usada nos rótulos deste catálogo. Fica explícita no
 # JSON e no cabeçalho das tabelas porque o mesmo código muda de significado
@@ -24,6 +24,12 @@ class CheckMeta:
     recommendation: str
     owasp: str | None = None
     cwe: str | None = None
+    # `kw_only=True`: campo obrigatório (sem default) posicionado DEPOIS de campos
+    # com default só é legal em dataclass como keyword-only — e é isso que se
+    # quer: toda entrada nova do catálogo declara `finding_type=`/`confidence=`
+    # explicitamente, sem depender da ordem posicional dos 21 pares já escritos.
+    finding_type: FindingType = field(kw_only=True)
+    confidence: Confidence = field(kw_only=True)
 
 
 CATALOG: dict[str, CheckMeta] = {
@@ -36,6 +42,8 @@ CATALOG: dict[str, CheckMeta] = {
             "Rejeite explicitamente 'none'. Use uma allowlist fixa de algoritmos na verificação.",
             "A07:2025 Authentication Failures",
             "CWE-347",
+            finding_type=FindingType.ALGORITHM,
+            confidence=Confidence.HIGH,
         ),
         CheckMeta(
             "alg-missing",
@@ -44,6 +52,8 @@ CATALOG: dict[str, CheckMeta] = {
             "Sem 'alg' a verificação fica ambígua. Fixe o algoritmo esperado no servidor.",
             "A07:2025 Authentication Failures",
             "CWE-347",
+            finding_type=FindingType.ALGORITHM,
+            confidence=Confidence.HIGH,
         ),
         CheckMeta(
             "alg-unknown",
@@ -52,6 +62,8 @@ CATALOG: dict[str, CheckMeta] = {
             "Aceite apenas os algoritmos que você realmente usa (allowlist).",
             "A07:2025 Authentication Failures",
             "CWE-347",
+            finding_type=FindingType.ALGORITHM,
+            confidence=Confidence.MEDIUM,
         ),
         CheckMeta(
             "alg-hmac-advisory",
@@ -61,6 +73,8 @@ CATALOG: dict[str, CheckMeta] = {
             "há risco de confusão de algoritmo (RS→HS) — separe as chaves e fixe o algoritmo.",
             "A04:2025 Cryptographic Failures",
             "CWE-326",
+            finding_type=FindingType.ALGORITHM,
+            confidence=Confidence.LOW,
         ),
         CheckMeta(
             "claim-no-exp",
@@ -69,6 +83,8 @@ CATALOG: dict[str, CheckMeta] = {
             "Emita tokens de vida curta com 'exp'. Sem isso, um token vazado é válido para sempre.",
             "A07:2025 Authentication Failures",
             "CWE-613",
+            finding_type=FindingType.CLAIM,
+            confidence=Confidence.HIGH,
         ),
         CheckMeta(
             "claim-expired",
@@ -77,6 +93,8 @@ CATALOG: dict[str, CheckMeta] = {
             "Informativo: o 'exp' já passou. Um verificador correto rejeitaria este token.",
             None,
             None,
+            finding_type=FindingType.CLAIM,
+            confidence=Confidence.HIGH,
         ),
         CheckMeta(
             "claim-long-lifetime",
@@ -85,6 +103,8 @@ CATALOG: dict[str, CheckMeta] = {
             "Reduza a validade (minutos/horas). Use refresh tokens em vez de access tokens longevos.",
             "A07:2025 Authentication Failures",
             "CWE-613",
+            finding_type=FindingType.CLAIM,
+            confidence=Confidence.MEDIUM,
         ),
         CheckMeta(
             "claim-no-iat",
@@ -93,6 +113,8 @@ CATALOG: dict[str, CheckMeta] = {
             "Inclua 'iat' para permitir políticas de idade e auditoria.",
             "A07:2025 Authentication Failures",
             None,
+            finding_type=FindingType.CLAIM,
+            confidence=Confidence.MEDIUM,
         ),
         CheckMeta(
             "claim-no-aud",
@@ -101,6 +123,8 @@ CATALOG: dict[str, CheckMeta] = {
             "Valide 'aud' no servidor para impedir reúso do token em outro serviço.",
             "A07:2025 Authentication Failures",
             "CWE-345",
+            finding_type=FindingType.CLAIM,
+            confidence=Confidence.MEDIUM,
         ),
         CheckMeta(
             "claim-no-iss",
@@ -109,6 +133,8 @@ CATALOG: dict[str, CheckMeta] = {
             "Inclua e valide 'iss' para amarrar o token ao emissor esperado.",
             "A07:2025 Authentication Failures",
             "CWE-345",
+            finding_type=FindingType.CLAIM,
+            confidence=Confidence.MEDIUM,
         ),
         CheckMeta(
             "claim-malformed-time",
@@ -119,6 +145,8 @@ CATALOG: dict[str, CheckMeta] = {
             "(fail-open) — o token deixa de expirar. Emita NumericDate e rejeite o que não for.",
             "A07:2025 Authentication Failures",
             "CWE-613",
+            finding_type=FindingType.CLAIM,
+            confidence=Confidence.HIGH,
         ),
         CheckMeta(
             "claim-nbf-future",
@@ -127,6 +155,8 @@ CATALOG: dict[str, CheckMeta] = {
             "Informativo: o token ainda não é válido (not-before no futuro).",
             None,
             None,
+            finding_type=FindingType.CLAIM,
+            confidence=Confidence.HIGH,
         ),
         CheckMeta(
             "header-jku",
@@ -136,6 +166,8 @@ CATALOG: dict[str, CheckMeta] = {
             "Use uma allowlist local de chaves confiáveis.",
             "A01:2025 Broken Access Control",
             "CWE-918",
+            finding_type=FindingType.HEADER,
+            confidence=Confidence.HIGH,
         ),
         CheckMeta(
             "header-x5u",
@@ -144,6 +176,8 @@ CATALOG: dict[str, CheckMeta] = {
             "Idem 'jku': não carregue material de chave de URL controlável pelo emissor do token.",
             "A01:2025 Broken Access Control",
             "CWE-918",
+            finding_type=FindingType.HEADER,
+            confidence=Confidence.HIGH,
         ),
         CheckMeta(
             "header-jwk",
@@ -153,6 +187,8 @@ CATALOG: dict[str, CheckMeta] = {
             "use apenas chaves configuradas no servidor.",
             "A07:2025 Authentication Failures",
             "CWE-347",
+            finding_type=FindingType.HEADER,
+            confidence=Confidence.HIGH,
         ),
         CheckMeta(
             "header-x5c",
@@ -161,6 +197,8 @@ CATALOG: dict[str, CheckMeta] = {
             "Só confie em 'x5c' se validar a cadeia contra uma âncora confiável sua.",
             "A07:2025 Authentication Failures",
             "CWE-347",
+            finding_type=FindingType.HEADER,
+            confidence=Confidence.MEDIUM,
         ),
         CheckMeta(
             "header-kid-injection",
@@ -170,6 +208,8 @@ CATALOG: dict[str, CheckMeta] = {
             "é vetor de path traversal / injeção.",
             "A05:2025 Injection",
             "CWE-91",
+            finding_type=FindingType.HEADER,
+            confidence=Confidence.HIGH,
         ),
         CheckMeta(
             "header-crit",
@@ -178,6 +218,8 @@ CATALOG: dict[str, CheckMeta] = {
             "Informativo: extensões críticas declaradas; confirme que o verificador as entende.",
             None,
             None,
+            finding_type=FindingType.HEADER,
+            confidence=Confidence.LOW,
         ),
         CheckMeta(
             "header-zip-jws",
@@ -189,6 +231,8 @@ CATALOG: dict[str, CheckMeta] = {
             "Rejeite tokens com 'zip' fora de JWE e limite o tamanho do payload descomprimido.",
             "A06:2025 Insecure Design",
             "CWE-409",
+            finding_type=FindingType.HEADER,
+            confidence=Confidence.HIGH,
         ),
         CheckMeta(
             "header-cty-nested",
@@ -199,6 +243,8 @@ CATALOG: dict[str, CheckMeta] = {
             "token interno sem validá-lo (assinatura, alg, exp, aud/iss).",
             "A07:2025 Authentication Failures",
             "CWE-347",
+            finding_type=FindingType.HEADER,
+            confidence=Confidence.MEDIUM,
         ),
         CheckMeta(
             "payload-nested-jwt",
@@ -208,6 +254,8 @@ CATALOG: dict[str, CheckMeta] = {
             "interno com o mesmo rigor da casca antes de confiar nele — não o repasse como confiável.",
             "A07:2025 Authentication Failures",
             "CWE-347",
+            finding_type=FindingType.PAYLOAD,
+            confidence=Confidence.LOW,
         ),
         CheckMeta(
             "payload-sensitive",
@@ -217,6 +265,8 @@ CATALOG: dict[str, CheckMeta] = {
             "pessoais (LGPD) nele; use JWE se precisar de confidencialidade.",
             "A04:2025 Cryptographic Failures",
             "CWE-522",
+            finding_type=FindingType.PAYLOAD,
+            confidence=Confidence.MEDIUM,
         ),
     ]
 }
@@ -236,6 +286,8 @@ def make_finding(
         severity=severity or meta.severity,
         detail=detail,
         recommendation=meta.recommendation,
+        finding_type=meta.finding_type,
+        confidence=meta.confidence,
         cwe=meta.cwe,
         owasp=meta.owasp,
         evidence=evidence,
