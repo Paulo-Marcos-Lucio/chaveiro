@@ -52,10 +52,13 @@ O Chaveiro cobre esses vetores dos dois lados: **audita** um token, **prova** a 
 | `claim-no-exp` / `claim-long-lifetime` | Token eterno / longevo demais | 🟠/🟡 | A07 · CWE-613 |
 | `claim-malformed-time` | `exp`/`nbf` presente mas não numérico → verificador falha aberto | 🟡 Média | A07 · CWE-613 |
 | `claim-no-aud` / `claim-no-iss` / `claim-no-iat` | Falta amarração de destino/emissor | 🔵 Baixa | A07 · CWE-345 |
+| `claim-no-sub` / `claim-no-client-id` | Perfil `access-token` (RFC 9068) sem titular/cliente | 🔵 Baixa | A07 · CWE-345 |
 | `header-cty-nested` / `payload-nested-jwt` | JWT aninhado (`cty: JWT` ou payload que **é** outro JWS) — valide as duas camadas | 🟡/🔵 | A07 · CWE-347 |
 | `payload-sensitive` | Segredo/PII no payload (JWT é base64, **não** cifrado) — varre também objetos aninhados e CPF | 🟡 Média | A04 · CWE-522 |
 
 > A coluna cita o código do **OWASP Top 10:2025** (edição vigente, publicada em 2025-11-06). O JSON traz `owasp_edition: "2025"` e o rótulo completo em cada achado.
+
+**Perfis de claims (`--perfil`):** por padrão a checagem de claims é genérica e cobra `aud`. Um access token no formato do **RFC 9068** (`typ: at+jwt`, detectado sozinho, ou forçado com `--perfil access-token`) troca essa exigência: `aud` deixa de ser cobrado — muita implantação real de access token legítima não a inclui — e em troca `sub`/`client_id` passam a valer. O perfil aplicado sai no JSON (`profile`) e no console, para o achado ausente nunca ser confundido com checagem quebrada.
 
 ---
 

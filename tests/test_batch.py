@@ -127,10 +127,10 @@ def test_audit_batch_isola_qualquer_excecao_nao_so_jwterror(
     """
     real = audit_token
 
-    def fake(token: str, now: int) -> object:
+    def fake(token: str, now: int, profile: object = None) -> object:
         if "veneno" in token:
             raise RuntimeError("erro inesperado no meio do lote")
-        return real(token, now)
+        return real(token, now, profile)
 
     monkeypatch.setattr(audit_mod, "audit_token", fake)
     outcomes = audit_batch(f"veneno.aaa.bbb\n{_clean_rs256()}\n", NOW)

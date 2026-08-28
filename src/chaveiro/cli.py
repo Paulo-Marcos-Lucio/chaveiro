@@ -23,7 +23,7 @@ from chaveiro.attacks.crack import crack_with_defaults
 from chaveiro.audit import audit_batch, audit_token, summarize
 from chaveiro.checks.catalog import CATALOG, OWASP_EDITION
 from chaveiro.core.jwt import JWTError, decode, encode_hmac
-from chaveiro.core.models import DecodedToken, Severity
+from chaveiro.core.models import DecodedToken, Profile, Severity
 from chaveiro.report import console as console_report
 from chaveiro.report.json_report import batch_to_json, to_json
 
@@ -56,6 +56,21 @@ _AVISO_CLAIMS_COMPLETAS = (
 class Format(str, Enum):
     console = "console"
     json = "json"
+
+
+class Perfil(str, Enum):
+    """Opção de CLI para o perfil de claims (`chaveiro.core.models.Profile`).
+
+    `auto` detecta pelo cabeçalho ('typ: at+jwt'); os outros dois forçam o
+    perfil independente do que o token declara.
+    """
+
+    auto = "auto"
+    generico = "generico"
+    access_token = "access-token"
+
+    def resolved(self) -> Profile | None:
+        return None if self is Perfil.auto else Profile(self.value)
 
 
 class FailOn(str, Enum):
@@ -151,6 +166,11 @@ def inspect(
         "--claims-completas",
         help="Mostra as claims em CLARO (PII do titular). Por padrão são redigidas.",
     ),
+    perfil: Perfil = typer.Option(
+        Perfil.auto,
+        "--perfil",
+        help="Contrato de claims a cobrar. 'auto' detecta por 'typ: at+jwt' no cabeçalho.",
+    ),
 ) -> None:
     """Decodifica e roda todas as checagens passivas de segurança."""
     token = _resolve_token(token)
@@ -159,7 +179,7 @@ def inspect(
     if claims_completas:
         err.print(f"[yellow]{_AVISO_CLAIMS_COMPLETAS}[/]")
     try:
-        result = audit_token(token, now if now is not None else int(time.time()))
+        result = audit_token(token, now if now is not None else int(time.time()), perfil.resolved())
     except JWTError as exc:
         err.print("[red]Token inválido:[/]", _txt(exc))
         raise typer.Exit(2) from exc
@@ -217,6 +237,11 @@ def batch(
         "--claims-completas",
         help="Mostra as claims em CLARO (PII do titular). Por padrão são redigidas.",
     ),
+    perfil: Perfil = typer.Option(
+        Perfil.auto,
+        "--perfil",
+        help="Contrato de claims a cobrar em TODO o lote. 'auto' detecta por token.",
+    ),
 ) -> None:
     """Audita vários tokens (um por linha) de um arquivo ou stdin.
 
@@ -234,7 +259,7 @@ def batch(
     text = _read_source(path)
     if claims_completas:
         err.print(f"[yellow]{_AVISO_CLAIMS_COMPLETAS}[/]")
-    outcomes = audit_batch(text, now if now is not None else int(time.time()))
+    outcomes = audit_batch(text, now if now is not None else int(time.time()), perfil.resolved())
     if not outcomes:
         err.print("[yellow]Nenhum token encontrado na entrada.[/] (um token por linha)")
         raise typer.Exit(0)

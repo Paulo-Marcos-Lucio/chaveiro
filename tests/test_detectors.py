@@ -41,6 +41,16 @@ _CASOS_POSITIVOS: list[tuple[str, dict, dict]] = [
     ("claim-no-iat", {"alg": "HS256"}, {"exp": NOW + 60, "aud": "x", "iss": "y"}),
     ("claim-no-aud", {"alg": "HS256"}, {"exp": NOW + 60, "iat": NOW, "iss": "y"}),
     ("claim-no-iss", {"alg": "HS256"}, {"exp": NOW + 60, "iat": NOW, "aud": "x"}),
+    (
+        "claim-no-sub",
+        {"alg": "HS256", "typ": "at+jwt"},
+        {"exp": NOW + 60, "iat": NOW, "iss": "y", "client_id": "c1"},
+    ),
+    (
+        "claim-no-client-id",
+        {"alg": "HS256", "typ": "at+jwt"},
+        {"exp": NOW + 60, "iat": NOW, "iss": "y", "sub": "u1"},
+    ),
     ("claim-malformed-time", {"alg": "HS256"}, {"exp": "1", "iat": NOW}),
     ("claim-nbf-future", {"alg": "HS256"}, {"nbf": NOW + 3600, "exp": NOW + 7200}),
     ("payload-nested-jwt", {"alg": "HS256"}, {"assertion": _INNER_JWT}),
@@ -88,6 +98,21 @@ _CASOS_NEGATIVOS: list[tuple[str, dict, dict]] = [
     ("claim-long-lifetime", {"alg": "HS256"}, {"iat": NOW, "exp": NOW + 300}),
     # token sem 'zip' não dispara o achado de compressão em JWS.
     ("header-zip-jws", {"alg": "HS256"}, {"sub": "a"}),
+    # perfil access-token (RFC 9068): access token legítimo sem 'aud' não é
+    # mais achado — é exatamente o caso que este item corrige (CHV-03).
+    (
+        "claim-no-aud",
+        {"alg": "HS256", "typ": "at+jwt"},
+        {"exp": NOW + 60, "iat": NOW, "iss": "y", "sub": "u1", "client_id": "c1"},
+    ),
+    # fora do perfil access-token, sub/client_id ausentes não são achado —
+    # essas duas checagens só existem dentro do contrato do RFC 9068.
+    ("claim-no-sub", {"alg": "HS256"}, {"exp": NOW + 60, "iat": NOW, "aud": "x", "iss": "y"}),
+    (
+        "claim-no-client-id",
+        {"alg": "HS256"},
+        {"exp": NOW + 60, "iat": NOW, "aud": "x", "iss": "y"},
+    ),
 ]
 
 

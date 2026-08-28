@@ -28,6 +28,20 @@ _RANK: dict[Severity, int] = {
 }
 
 
+class Profile(str, Enum):
+    """Qual contrato de claims a checagem de claims cobra.
+
+    O genérico é a base comum de qualquer JWT (exp/iat/aud/iss). O perfil
+    ``access-token`` segue o RFC 9068 (JWT Profile for OAuth 2.0 Access
+    Tokens): ``aud`` deixa de ser exigido — na prática, muitas implantações
+    de access token legítimas não a incluem — e em troca o perfil cobra
+    ``sub`` e ``client_id``, que o genérico nunca verificava.
+    """
+
+    GENERICO = "generico"
+    ACCESS_TOKEN = "access-token"
+
+
 @dataclass(frozen=True)
 class DecodedToken:
     """Um JWS/JWT decodificado — **sem** verificação de assinatura."""
@@ -70,6 +84,10 @@ class Finding:
 class AuditResult:
     token: DecodedToken
     findings: list[Finding] = field(default_factory=list)
+    # Qual perfil decidiu o contrato de claims (explícito via --perfil ou
+    # detectado por 'typ'). Fica no resultado para o laudo dizer POR QUE um
+    # achado de claim ausente não apareceu, em vez de deixar isso implícito.
+    profile: Profile = Profile.GENERICO
 
     def max_severity(self) -> Severity | None:
         if not self.findings:

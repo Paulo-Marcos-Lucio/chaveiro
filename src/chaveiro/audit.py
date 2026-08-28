@@ -11,19 +11,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from chaveiro.checks.detectors import run_all
-from chaveiro.core.jwt import JWTError, decode
-from chaveiro.core.models import AuditResult, Severity
+from chaveiro.core.jwt import JWTError, decode, detect_profile
+from chaveiro.core.models import AuditResult, Profile, Severity
 
 _BEARER = "bearer "
 
 
-def audit_token(token: str, now: int) -> AuditResult:
+def audit_token(token: str, now: int, profile: Profile | None = None) -> AuditResult:
     """Decodifica (sem verificar assinatura) e roda todas as checagens passivas.
 
-    Levanta `JWTError` se o token for malformado — o chamador decide o que fazer.
+    ``profile=None`` detecta o perfil pelo cabeçalho ('typ: at+jwt'); passe um
+    valor para forçar (ex.: ``--perfil access-token`` na CLI). Levanta
+    `JWTError` se o token for malformado — o chamador decide o que fazer.
     """
     decoded = decode(token)
-    return AuditResult(token=decoded, findings=run_all(decoded, now))
+    resolved = profile if profile is not None else detect_profile(decoded.header)
+    return AuditResult(token=decoded, findings=run_all(decoded, now, resolved), profile=resolved)
 
 
 @dataclass(frozen=True)
@@ -64,8 +67,12 @@ def iter_candidates(text: str) -> list[tuple[int, str]]:
     return candidates
 
 
-def audit_batch(text: str, now: int) -> list[TokenOutcome]:
+def audit_batch(text: str, now: int, profile: Profile | None = None) -> list[TokenOutcome]:
     """Audita todos os candidatos a token do texto, preservando a ordem.
+
+    ``profile`` segue a mesma regra de `audit_token`: ``None`` detecta por
+    token (cada linha pode ter um 'typ' diferente); um valor explícito força
+    o mesmo perfil no lote inteiro.
 
     Um token que falhe **por qualquer motivo** vira um `TokenOutcome` com
     `error` — não interrompe o lote nem contamina os demais. O `except` é largo
@@ -77,7 +84,7 @@ def audit_batch(text: str, now: int) -> list[TokenOutcome]:
     outcomes: list[TokenOutcome] = []
     for index, (lineno, candidate) in enumerate(iter_candidates(text), start=1):
         try:
-            result = audit_token(candidate, now)
+            result = audit_token(candidate, now, profile)
         except JWTError as exc:
             outcomes.append(TokenOutcome(index, lineno, candidate, None, str(exc)))
         except Exception as exc:

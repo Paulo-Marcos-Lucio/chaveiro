@@ -21,7 +21,7 @@ from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
-from chaveiro.core.models import DecodedToken
+from chaveiro.core.models import DecodedToken, Profile
 
 _HMAC_HASH: dict[str, Any] = {
     "HS256": hashlib.sha256,
@@ -46,6 +46,11 @@ _PSS_HASH: dict[str, hashes.HashAlgorithm] = {
 }
 # EdDSA (RFC 8037): 'alg' único; a curva vem do tipo da chave (Ed25519/Ed448).
 _EDDSA = "EdDSA"
+
+# RFC 9068 §2.1: o tipo de mídia do access token JWT é 'at+jwt', com o
+# prefixo 'application/' opcional no cabeçalho 'typ' — o mesmo padrão de
+# comparação leniente já usado para 'cty' em check_nesting.
+_AT_JWT_TYP = {"at+jwt", "application/at+jwt"}
 
 # RFC 7515 §2: base64url, alfabeto -_ e **sem** padding.
 _B64URL = re.compile(r"[A-Za-z0-9_-]*")
@@ -189,6 +194,18 @@ def looks_like_jws(value: str) -> bool:
     except JWTError:
         return False
     return isinstance(header, dict) and "alg" in header
+
+
+def detect_profile(header: dict[str, Any]) -> Profile:
+    """Detecta o perfil de claims a partir do cabeçalho, via 'typ: at+jwt'.
+
+    Só decide sozinho quando o próprio token se declara — o resto (perfil
+    explícito por opção de CLI) é decisão de quem chama, não deste helper.
+    """
+    typ = header.get("typ")
+    if isinstance(typ, str) and typ.strip().lower() in _AT_JWT_TYP:
+        return Profile.ACCESS_TOKEN
+    return Profile.GENERICO
 
 
 def _decode_json(segment: str, what: str) -> dict[str, Any]:

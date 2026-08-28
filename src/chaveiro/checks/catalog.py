@@ -111,6 +111,24 @@ CATALOG: dict[str, CheckMeta] = {
             "CWE-345",
         ),
         CheckMeta(
+            "claim-no-sub",
+            "Sem 'sub' (perfil access-token, RFC 9068)",
+            Severity.LOW,
+            "RFC 9068 §2.2 exige 'sub' em todo access token JWT — sem ele o recurso não sabe "
+            "para quem a permissão vale. Inclua o identificador do titular do recurso.",
+            "A07:2025 Authentication Failures",
+            "CWE-345",
+        ),
+        CheckMeta(
+            "claim-no-client-id",
+            "Sem 'client_id' (perfil access-token, RFC 9068)",
+            Severity.LOW,
+            "RFC 9068 §2.2 exige 'client_id' em todo access token JWT — sem ele o recurso não "
+            "sabe qual cliente OAuth2 apresentou o token. Inclua o identificador do cliente.",
+            "A07:2025 Authentication Failures",
+            "CWE-345",
+        ),
+        CheckMeta(
             "claim-malformed-time",
             "Claim temporal presente mas não numérica",
             Severity.MEDIUM,
