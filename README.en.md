@@ -53,10 +53,13 @@ Chaveiro covers these vectors from both sides: it **audits** a token, **proves**
 | `claim-no-exp` / `claim-long-lifetime` | Token that never expires / lives too long | 🟠/🟡 | A07 · CWE-613 |
 | `claim-malformed-time` | `exp`/`nbf` present but not numeric → verifier fails open | 🟡 Medium | A07 · CWE-613 |
 | `claim-no-aud` / `claim-no-iss` / `claim-no-iat` | Missing binding to audience/issuer | 🔵 Low | A07 · CWE-345 |
+| `claim-no-sub` / `claim-no-client-id` | `access-token` profile (RFC 9068) missing subject/client | 🔵 Low | A07 · CWE-345 |
 | `header-cty-nested` / `payload-nested-jwt` | Nested JWT (`cty: JWT` or a payload that **is** another JWS) — validate both layers | 🟡/🔵 | A07 · CWE-347 |
 | `payload-sensitive` | Secret/PII in the payload (JWT is base64, **not** encrypted) — also scans nested objects and CPF (Brazilian individual taxpayer ID) | 🟡 Medium | A04 · CWE-522 |
 
 > The column cites the **OWASP Top 10:2025** code (the current edition, published on 2025-11-06). The JSON includes `owasp_edition: "2025"` and the full label on each finding.
+
+**Claims profiles (`--perfil`):** by default the claims check is generic and requires `aud`. A **RFC 9068** access token (`typ: at+jwt`, detected on its own, or forced with `--perfil access-token`) swaps that requirement: `aud` stops being required — many real access token deployments legitimately omit it — and `sub`/`client_id` become required instead. The applied profile is in the JSON (`profile`) and on the console, so a missing finding is never mistaken for a broken check.
 
 ---
 

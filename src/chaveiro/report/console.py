@@ -88,7 +88,12 @@ def _render_token(result: AuditResult, console: Console, *, redact: bool = False
     console.print(
         Panel(
             body,
-            title=Text.assemble("Token · alg=", (result.token.alg or "—", "bold")),
+            title=Text.assemble(
+                "Token · alg=",
+                (result.token.alg or "—", "bold"),
+                " · perfil=",
+                (result.profile.value, "bold"),
+            ),
             border_style="cyan",
         )
     )

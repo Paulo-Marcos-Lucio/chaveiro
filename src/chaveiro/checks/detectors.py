@@ -8,8 +8,8 @@ from collections.abc import Iterator
 from typing import Any
 
 from chaveiro.checks.catalog import make_finding
-from chaveiro.core.jwt import looks_like_jws
-from chaveiro.core.models import DecodedToken, Finding
+from chaveiro.core.jwt import detect_profile, looks_like_jws
+from chaveiro.core.models import DecodedToken, Finding, Profile
 
 _KNOWN_ALGS = {
     "HS256", "HS384", "HS512",
@@ -67,12 +67,14 @@ _CPF = re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b|\b\d{11}\b")
 _CTY_NESTED = {"jwt", "application/jwt"}
 
 
-def run_all(token: DecodedToken, now: int) -> list[Finding]:
+def run_all(token: DecodedToken, now: int, profile: Profile | None = None) -> list[Finding]:
+    """``profile=None`` detecta pelo cabeçalho ('typ: at+jwt'); passe um valor para forçar."""
+    resolved = profile if profile is not None else detect_profile(token.header)
     findings: list[Finding] = []
     findings += check_alg(token)
     findings += check_header(token)
     findings += check_nesting(token)
-    findings += check_claims(token, now)
+    findings += check_claims(token, now, resolved)
     findings += check_payload(token)
     return findings
 
@@ -199,7 +201,9 @@ def check_nesting(token: DecodedToken) -> list[Finding]:
     return out
 
 
-def check_claims(token: DecodedToken, now: int) -> list[Finding]:
+def check_claims(
+    token: DecodedToken, now: int, profile: Profile = Profile.GENERICO
+) -> list[Finding]:
     out: list[Finding] = []
     payload = token.payload
     if token.nested is not None:
@@ -241,8 +245,31 @@ def check_claims(token: DecodedToken, now: int) -> list[Finding]:
 
     if "iat" not in payload:
         out.append(make_finding("claim-no-iat", "Sem 'iat'."))
-    if "aud" not in payload:
+
+    if profile is Profile.ACCESS_TOKEN:
+        # RFC 9068 §2.2: o access token JWT tem contrato de claims próprio.
+        # 'aud' fica de fora — na prática, access token legítimo sem 'aud'
+        # era exatamente o falso positivo que abriu este item — e em troca
+        # o perfil cobra 'sub'/'client_id', que a checagem genérica nunca
+        # verificava (não fazem sentido fora de um access token).
+        if "sub" not in payload:
+            out.append(
+                make_finding(
+                    "claim-no-sub",
+                    "Perfil access-token (RFC 9068) sem 'sub' — não declara o titular do recurso.",
+                )
+            )
+        if "client_id" not in payload:
+            out.append(
+                make_finding(
+                    "claim-no-client-id",
+                    "Perfil access-token (RFC 9068) sem 'client_id' — não declara qual cliente "
+                    "OAuth2 apresentou o token.",
+                )
+            )
+    elif "aud" not in payload:
         out.append(make_finding("claim-no-aud", "Sem 'aud'."))
+
     if "iss" not in payload:
         out.append(make_finding("claim-no-iss", "Sem 'iss'."))
     if nbf is not None and nbf > now:

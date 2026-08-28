@@ -3,6 +3,27 @@
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
 [SemVer](https://semver.org/lang/pt-BR/).
 
+## [Não lançado]
+
+### Adicionado
+
+- **Perfil de claims `access-token` (RFC 9068)**: `--perfil access-token`, ou detecção
+  automática por `typ: at+jwt` no cabeçalho, muda o contrato de claims cobrado. Um access
+  token legítimo sem `aud` — caso real registrado em `audit/PATCH_PLAN.md` Onda 5 — deixa de
+  virar achado (`claim-no-aud`); em troca passam a valer as exigências do próprio perfil:
+  `iss`/`exp` (já cobrados) mais os dois novos `claim-no-sub` e `claim-no-client-id`. O perfil
+  aplicado (`generico` por padrão) sai no campo `profile` do JSON e no título do painel do
+  console, para a ausência de um achado nunca ser confundida com checagem quebrada.
+
+### Corrigido
+
+- **Falso-positivo genérico em access token do RFC 9068**: a checagem de claims cobrava `aud`
+  de qualquer token, sem distinguir perfil — um access token real sem `aud` virava achado
+  incorretamente. A correção trava a CLASSE (perfil `access-token` suprime `aud` e exige
+  `sub`/`client_id` para QUALQUER combinação de claims extras, não só o exemplo do relatório),
+  com invariante property-based (Hypothesis) provando os dois lados: acionado no perfil
+  genérico, silenciado no perfil access-token.
+
 ## [0.5.0] — 2026-08-05
 
 ### Adicionado

@@ -70,6 +70,10 @@ def to_document(
             # Token interno quando a casca é um JWT aninhado (RFC 7519 §5.2).
             "nested": result.token.nested,
         },
+        # Qual perfil decidiu o contrato de claims (explícito ou detectado por
+        # 'typ') — sem isto, a ausência de 'claim-no-aud' num access token
+        # pareceria uma checagem que parou de rodar, não uma decisão de perfil.
+        "profile": result.profile.value,
         "summary": {"total": len(findings), "by_severity": counts},
         "findings": [finding_to_dict(f) for f in findings],
     }

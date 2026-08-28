@@ -33,6 +33,67 @@ def test_inspect_none_token_json_exit1() -> None:
     assert any(f["id"] == "alg-none" for f in doc["findings"])
 
 
+def _access_token_sem_aud() -> str:
+    """Um access token real (RFC 9068): 'typ: at+jwt', sem 'aud', com o resto
+    das claims do perfil (iss/exp/iat/sub/client_id) — o caso concreto que
+    CHV-03 corrige."""
+    return hs_token(
+        {
+            "iss": "https://as.example",
+            "sub": "user-1",
+            "client_id": "client-1",
+            "exp": NOW + 300,
+            "iat": NOW,
+        },
+        typ="at+jwt",
+    )
+
+
+def test_perfil_access_token_detectado_por_typ_nao_cobra_aud() -> None:
+    """Detecção automática (sem --perfil): 'typ: at+jwt' já basta para o token
+    legítimo sem 'aud' deixar de virar achado."""
+    token = _access_token_sem_aud()
+    result = runner.invoke(app, ["inspect", token, "-f", "json", "--now", str(NOW)])
+    doc = json.loads(result.stdout)
+    ids = {f["id"] for f in doc["findings"]}
+    assert "claim-no-aud" not in ids
+    assert doc["profile"] == "access-token"
+
+
+def test_perfil_access_token_explicito_mesmo_sem_typ() -> None:
+    """`--perfil access-token` força o perfil mesmo num token sem 'typ: at+jwt'."""
+    token = hs_token(
+        {
+            "iss": "https://as.example",
+            "sub": "user-1",
+            "client_id": "client-1",
+            "exp": NOW + 300,
+            "iat": NOW,
+        }
+    )  # typ padrão 'JWT' — sem o --perfil, isto cairia no genérico
+    result = runner.invoke(
+        app, ["inspect", token, "-f", "json", "--now", str(NOW), "--perfil", "access-token"]
+    )
+    doc = json.loads(result.stdout)
+    ids = {f["id"] for f in doc["findings"]}
+    assert "claim-no-aud" not in ids
+    assert doc["profile"] == "access-token"
+
+
+def test_perfil_generico_explicito_ignora_typ_at_jwt() -> None:
+    """`--perfil generico` força o genérico mesmo com 'typ: at+jwt' — prova o
+    outro lado: o mesmo token legítimo sem 'aud' volta a ser achado fora do
+    perfil access-token."""
+    token = _access_token_sem_aud()
+    result = runner.invoke(
+        app, ["inspect", token, "-f", "json", "--now", str(NOW), "--perfil", "generico"]
+    )
+    doc = json.loads(result.stdout)
+    ids = {f["id"] for f in doc["findings"]}
+    assert "claim-no-aud" in ids
+    assert doc["profile"] == "generico"
+
+
 def test_inspect_output_grava_arquivo(tmp_path: Path) -> None:
     token = raw_token({"alg": "none"}, {"sub": "admin"})
     saida = tmp_path / "laudo.json"

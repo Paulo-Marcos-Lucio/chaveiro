@@ -15,8 +15,10 @@ from __future__ import annotations
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from chaveiro.checks.detectors import has_cpf
+from chaveiro.checks.detectors import has_cpf, run_all
+from chaveiro.core.jwt import decode
 from chaveiro.report.redaction import REDIGIDO, redact_claims
+from tests.conftest import hs_token
 
 _CHAVES_INOCENTES = st.sampled_from(["nota", "obs", "custom", "documento", "campo_x", "dados"])
 _ESTRUTURAIS = st.sampled_from(["alg", "exp", "iat", "nbf", "iss", "aud", "typ", "kid", "jti"])
@@ -64,3 +66,87 @@ def test_chave_estrutural_nunca_e_redigida(chave: str, valor: int) -> None:
     """INVARIANTE 3: metadados do token (exp/iat/aud/...) não podem ser destruídos pela redação."""
     saida = redact_claims({chave: valor})
     assert saida[chave] == valor, f"chave estrutural {chave!r} foi redigida indevidamente"
+
+
+# --------------------------------------------------------------------------- #
+# Testes property-based da INVARIANTE do perfil access-token (CHV-03,
+# RFC 9068). O defeito original: a checagem de claims era genérica e cobrava
+# 'aud' de qualquer token, inclusive de um access token legítimo que
+# simplesmente não a inclui — falso positivo. A correção não pode travar só
+# o exemplo que apareceu no relatório; precisa travar a CLASSE: nenhuma
+# combinação de claims extras faz 'aud' voltar a ser cobrada no perfil
+# access-token, e 'sub'/'client_id' (o substituto do RFC 9068) nunca são
+# perdoados quando realmente faltam.
+# --------------------------------------------------------------------------- #
+
+NOW_PERFIL = 1_800_000_000
+_CLAIM_EXTRAS = st.dictionaries(
+    st.sampled_from(["scope", "jti", "nota", "custom_claim", "amr"]),
+    st.one_of(st.text(max_size=20), st.integers(0, 10_000)),
+    max_size=4,
+)
+
+
+@settings(max_examples=200)
+@given(extra=_CLAIM_EXTRAS)
+def test_access_token_legitimo_sem_aud_nunca_e_achado(extra: dict) -> None:
+    """INVARIANTE 4: no perfil access-token ('typ: at+jwt'), 'iss'/'exp'/'iat'/
+    'sub'/'client_id' presentes e 'aud' ausente NUNCA produz achado — não
+    importa que outras claims o token carregue."""
+    payload = {
+        "iss": "https://as.example",
+        "sub": "user-1",
+        "client_id": "client-1",
+        "exp": NOW_PERFIL + 300,
+        "iat": NOW_PERFIL,
+        **{k: v for k, v in extra.items() if k != "aud"},
+    }
+    token = hs_token(payload, typ="at+jwt")
+    findings = {f.check_id for f in run_all(decode(token), NOW_PERFIL)}
+    assert "claim-no-aud" not in findings, "perfil access-token voltou a cobrar 'aud'"
+    assert "claim-no-sub" not in findings
+    assert "claim-no-client-id" not in findings
+
+
+@settings(max_examples=200)
+@given(extra=_CLAIM_EXTRAS)
+def test_generico_sem_aud_continua_achado(extra: dict) -> None:
+    """INVARIANTE 4 (outro lado): o MESMO conjunto de claims, sem 'typ: at+jwt',
+    continua cobrando 'aud' — a supressão é decisão do perfil access-token, não
+    uma regressão geral da checagem de claims."""
+    payload = {
+        "iss": "https://as.example",
+        "sub": "user-1",
+        "client_id": "client-1",
+        "exp": NOW_PERFIL + 300,
+        "iat": NOW_PERFIL,
+        **{k: v for k, v in extra.items() if k != "aud"},
+    }
+    token = hs_token(payload)  # typ padrão 'JWT' — perfil genérico
+    findings = {f.check_id for f in run_all(decode(token), NOW_PERFIL)}
+    assert "claim-no-aud" in findings, "perfil genérico parou de cobrar 'aud'"
+
+
+@settings(max_examples=200)
+@given(tem_sub=st.booleans(), tem_client_id=st.booleans(), extra=_CLAIM_EXTRAS)
+def test_access_token_cobra_sub_e_client_id_quando_ausentes(
+    tem_sub: bool, tem_client_id: bool, extra: dict
+) -> None:
+    """INVARIANTE 4 (o substituto): no perfil access-token, 'sub' e 'client_id'
+    ausentes SEMPRE viram achado, para qualquer combinação de presença dos
+    dois e qualquer claim extra — são o preço de não cobrar mais 'aud'."""
+    payload = {
+        "iss": "https://as.example",
+        "exp": NOW_PERFIL + 300,
+        "iat": NOW_PERFIL,
+        **{k: v for k, v in extra.items() if k not in ("sub", "client_id", "aud")},
+    }
+    if tem_sub:
+        payload["sub"] = "user-1"
+    if tem_client_id:
+        payload["client_id"] = "client-1"
+    token = hs_token(payload, typ="at+jwt")
+    findings = {f.check_id for f in run_all(decode(token), NOW_PERFIL)}
+    assert ("claim-no-sub" in findings) == (not tem_sub)
+    assert ("claim-no-client-id" in findings) == (not tem_client_id)
+    assert "claim-no-aud" not in findings
