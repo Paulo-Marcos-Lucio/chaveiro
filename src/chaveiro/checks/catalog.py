@@ -63,6 +63,34 @@ CATALOG: dict[str, CheckMeta] = {
             "CWE-326",
         ),
         CheckMeta(
+            "signature-empty",
+            "Assinatura vazia num algoritmo de assinatura",
+            Severity.HIGH,
+            "O 3o segmento (assinatura) esta vazio, mas 'alg' nao e 'none'. Um verificador "
+            "leniente pode aceitar o token como se estivesse assinado. Rejeite assinatura vazia.",
+            "A07:2025 Authentication Failures",
+            "CWE-347",
+        ),
+        CheckMeta(
+            "claim-iat-future",
+            "Emissao no futuro (claim 'iat' > agora)",
+            Severity.MEDIUM,
+            "'iat' esta no futuro: o token foi pre-datado (relogio adulterado ou emissor "
+            "comprometido). Rejeite 'iat' futuro alem de uma folga pequena de relogio.",
+            "A07:2025 Authentication Failures",
+            "CWE-345",
+        ),
+        CheckMeta(
+            "header-duplicate-key",
+            "Cabecalho com chave repetida (ambiguidade de parser)",
+            Severity.HIGH,
+            "O cabecalho repete uma chave (ex.: dois 'alg'). Parsers divergem (primeiro x ultimo "
+            "vence): um atacante explora a diferenca entre o que o auditor le e o que o verificador "
+            "usa. Rejeite tokens com chaves de cabecalho repetidas.",
+            "A07:2025 Authentication Failures",
+            "CWE-347",
+        ),
+        CheckMeta(
             "claim-no-exp",
             "Sem expiração (claim 'exp' ausente)",
             Severity.HIGH,

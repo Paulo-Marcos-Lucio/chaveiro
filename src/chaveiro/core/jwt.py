@@ -102,6 +102,14 @@ def decode(token: str) -> DecodedToken:
     guarda o token interno, que precisa ser auditado à parte.
     """
     token = token.strip()
+    # 'Bearer ' colado na frente (copiado de um header Authorization) e quebras de linha no
+    # meio (token colado de e-mail/PDF) fazem o decode estrito recusar um token real. Um
+    # verificador tolerante os aceitaria, entao o auditor tambem precisa ver o token por
+    # baixo do ruido (FN H1/H2). O alfabeto base64url nao tem espaco nem quebra, entao
+    # remover espacos em branco nunca corrompe um token legitimo.
+    if token[:7].lower() == "bearer ":
+        token = token[7:].strip()
+    token = re.sub(r"\s+", "", token)
     parts = token.split(".")
     if len(parts) != 3:
         raise JWTError(f"esperados 3 segmentos separados por ponto, encontrei {len(parts)}")

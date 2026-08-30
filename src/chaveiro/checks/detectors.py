@@ -2,22 +2,28 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
+import urllib.parse
 from collections.abc import Iterator
 from typing import Any
 
 from chaveiro.checks.catalog import make_finding
-from chaveiro.core.jwt import looks_like_jws
+from chaveiro.core.jwt import JWTError, b64url_decode, decode, looks_like_jws
 from chaveiro.core.models import DecodedToken, Finding
 
 _KNOWN_ALGS = {
     "HS256", "HS384", "HS512",
     "RS256", "RS384", "RS512",
-    "ES256", "ES384", "ES512",
+    "ES256", "ES384", "ES512", "ES256K",
     "PS256", "PS384", "PS512",
     "EdDSA",
 }  # fmt: skip
+# Caracteres de largura zero / BOM: NAO sao whitespace para str.strip(), entao
+# 'none\u200b' escapava do alg-none. Homoglifo (cirilico 'o') NAO entra aqui de
+# proposito: e uma string diferente que um verificador tambem rejeita (nao e bypass).
+_ZERO_WIDTH = ("\u200b", "\u200c", "\u200d", "\ufeff", "\u2060", "\u00a0")
 _HMAC_ALGS = {"HS256", "HS384", "HS512"}
 _LONG_LIFETIME_S = 24 * 3600
 # Acima disso um inteiro não cabe em float (`/` estoura ~1.8e308) e o valor já
@@ -26,7 +32,36 @@ _LONG_LIFETIME_S = 24 * 3600
 _FLOAT_SAFE_SECONDS = 10**12
 _SECONDS_PER_YEAR = 365 * 24 * 3600
 
-_KID_DANGEROUS = ("..", "/", "\\", "'", '"', ";", "`", "$(", "|", "<", ">", "\x00", "\n")
+# Traversal / controle: uma barra SOZINHA nao e traversal (thumbprint base64 do Cognito,
+# kid hierarquico, kid como URL do emissor usam '/' legitimamente). So '..' e chars de
+# controle sao traversal. Injecao: metacaracteres de shell/SQL/LDAP que um kid legitimo
+# nao carrega. FP (kid-b64/url/logico) e FN (A1 percent-encoded, A2 LDAP, A3 SQLi, A4 &&)
+# eram os dois lados da mesma classe: blocklist ingenua por caractere.
+_KID_TRAVERSAL = ("..", "\x00", "\n", "\r", "\t")
+_KID_INJECTION = ("'", '"', ";", "`", "$(", "<", ">", "(", ")", "*", "&&", "||", "|", "\\")
+_KID_SQL_RE = re.compile(r"(?i)\b(?:or|and)\b\s+[\w']+\s*=\s*[\w']+|\bunion\b|--|/\*|;\s*drop\b")
+
+
+def _kid_perigoso(kid: str) -> bool:
+    """O 'kid' carrega traversal/injecao? Avalia a forma crua E a percent-decodificada
+    (um verificador que usa o kid num caminho de arquivo decodifica %2e%2e%2f -> ../)."""
+    candidatos = [kid]
+    try:
+        decodificado = urllib.parse.unquote(kid)
+        if decodificado != kid:
+            candidatos.append(decodificado)
+    except Exception:  # unquote nunca deveria falhar, mas nao derruba a auditoria
+        pass
+    for c in candidatos:
+        if any(t in c for t in _KID_TRAVERSAL):
+            return True
+        if any(t in c for t in _KID_INJECTION):
+            return True
+        if _KID_SQL_RE.search(c):
+            return True
+    return False
+
+
 _TIME_CLAIMS = ("exp", "iat", "nbf")
 # Igualdade exata: termos que só são sinal quando são a chave inteira ('token'
 # como substring casaria com 'token_type: Bearer', que é ruído de OAuth).
@@ -71,10 +106,97 @@ def run_all(token: DecodedToken, now: int) -> list[Finding]:
     findings: list[Finding] = []
     findings += check_alg(token)
     findings += check_header(token)
+    findings += check_signature(token)
+    findings += check_header_duplicates(token)
     findings += check_nesting(token)
     findings += check_claims(token, now)
     findings += check_payload(token)
+    # JWT aninhado: as vulnerabilidades moram no token INTERNO (ex.: casca HS256 envolvendo
+    # miolo alg:none). Auditar so a casca perde o vetor de confusao (FN J1).
+    if token.nested:
+        try:
+            interno = decode(token.nested)
+            findings += check_alg(interno)
+        except JWTError:
+            pass
     return findings
+
+
+def check_signature(token: DecodedToken) -> list[Finding]:
+    """Assinatura vazia num algoritmo de ASSINATURA = efetivamente nao assinado (FN D1/D2)."""
+    alg = token.header.get("alg")
+    if isinstance(alg, str) and alg.strip().lower() == "none":
+        return []  # 'none' ja e coberto por alg-none; assinatura vazia ali e esperada
+    if token.signature == b"":
+        return [
+            make_finding(
+                "signature-empty",
+                "A assinatura (3o segmento) esta vazia, mas 'alg' declara um algoritmo de "
+                "assinatura. Um verificador leniente pode aceitar o token como assinado.",
+                evidence=f"alg={alg!r}, assinatura=<vazia>",
+            )
+        ]
+    return []
+
+
+def _header_primeira_ocorrencia(raw_token: str) -> tuple[dict[str, Any], set[str]]:
+    """Reparse do cabecalho preservando a PRIMEIRA ocorrencia de cada chave e coletando as
+    repetidas. json.loads fica com a ULTIMA; parsers first-wins ficam com a primeira — a
+    diferenca e o ataque (FN F1/F2)."""
+    repetidas: set[str] = set()
+
+    def _first_wins(pares: list[tuple[str, Any]]) -> dict[str, Any]:
+        d: dict[str, Any] = {}
+        for k, v in pares:
+            if k in d:
+                repetidas.add(k)
+            else:
+                d[k] = v
+        return d
+
+    seg = raw_token.split(".", 1)[0]
+    dados = json.loads(b64url_decode(seg), object_pairs_hook=_first_wins)
+    return (dados if isinstance(dados, dict) else {}), repetidas
+
+
+def check_header_duplicates(token: DecodedToken) -> list[Finding]:
+    """Chave de cabecalho repetida: parser-differential. Avalia tambem a interpretacao
+    first-wins (que json.loads descartou) para alg/kid — a mais perigosa das duas vence."""
+    out: list[Finding] = []
+    try:
+        primeiro, repetidas = _header_primeira_ocorrencia(token.raw)
+    except (JWTError, ValueError):
+        return out
+    if not repetidas:
+        return out
+    out.append(
+        make_finding(
+            "header-duplicate-key",
+            f"O cabecalho repete a(s) chave(s) {sorted(repetidas)!r}. Parsers divergem sobre "
+            "qual valor vale (primeiro x ultimo) — um atacante explora a diferenca.",
+            evidence=f"repetidas={sorted(repetidas)!r}",
+        )
+    )
+    alg_primeiro = primeiro.get("alg")
+    if isinstance(alg_primeiro, str) and alg_primeiro.strip().lower() == "none":
+        out.append(
+            make_finding(
+                "alg-none",
+                "Sob interpretacao first-wins do cabecalho duplicado, 'alg' e 'none' — token "
+                "nao assinado para uma parte dos verificadores.",
+                evidence=f"alg(primeiro)={alg_primeiro!r}",
+            )
+        )
+    kid_primeiro = primeiro.get("kid")
+    if isinstance(kid_primeiro, str) and _kid_perigoso(kid_primeiro):
+        out.append(
+            make_finding(
+                "header-kid-injection",
+                "Sob interpretacao first-wins do cabecalho duplicado, o 'kid' contem traversal/injecao.",
+                evidence=f"kid(primeiro)={kid_primeiro!r}",
+            )
+        )
+    return out
 
 
 def check_alg(token: DecodedToken) -> list[Finding]:
@@ -89,6 +211,9 @@ def check_alg(token: DecodedToken) -> list[Finding]:
     # evidência — senão 'alg: none ' escaparia do CRÍTICO para o MÉDIO de
     # alg-unknown. O strip acompanha a leniência de caixa que já existia no none.
     normalized = alg.strip()
+    for zw in _ZERO_WIDTH:
+        normalized = normalized.replace(zw, "")
+    normalized = normalized.strip()
     if normalized.lower() == "none":
         out.append(
             make_finding(
@@ -147,7 +272,7 @@ def check_header(token: DecodedToken) -> list[Finding]:
             )
         )
     kid = header.get("kid")
-    if isinstance(kid, str) and any(token_ in kid for token_ in _KID_DANGEROUS):
+    if isinstance(kid, str) and _kid_perigoso(kid):
         out.append(
             make_finding(
                 "header-kid-injection",
@@ -229,7 +354,12 @@ def check_claims(token: DecodedToken, now: int) -> list[Finding]:
 
     # Sem 'iat' a vida útil é aproximada por 'agora': um token de 10 anos sem
     # 'iat' é MAIS perigoso, e era justo aí que a checagem se desligava.
-    if exp is not None:
+    # Refresh token (Keycloak: typ=Refresh) tem vida longa POR DESIGN — nao e achado.
+    typ = str(token.header.get("typ", "")).strip().lower()
+    e_refresh = (
+        typ in ("refresh", "refresh+jwt") or str(payload.get("typ", "")).lower() == "refresh"
+    )
+    if exp is not None and not e_refresh:
         base = "exp - iat" if iat is not None else "exp - agora, sem 'iat'"
         lifetime = exp - iat if iat is not None else exp - now
         if lifetime > _LONG_LIFETIME_S:
@@ -247,6 +377,9 @@ def check_claims(token: DecodedToken, now: int) -> list[Finding]:
         out.append(make_finding("claim-no-iss", "Sem 'iss'."))
     if nbf is not None and nbf > now:
         out.append(make_finding("claim-nbf-future", f"'nbf' no futuro (nbf={nbf}, agora={now})."))
+    # iat no futuro (alem de uma folga de relogio) = token pre-datado (FN C1).
+    if iat is not None and iat > now + 300:
+        out.append(make_finding("claim-iat-future", f"'iat' no futuro (iat={iat}, agora={now})."))
     return out
 
 
@@ -258,7 +391,7 @@ def check_payload(token: DecodedToken) -> list[Finding]:
     """
     out: list[Finding] = []
     for path, key, value in _walk(token.payload):
-        if _is_sensitive_key(key) and value not in (None, "", [], {}):
+        if _is_sensitive_key(key) and _valor_parece_segredo(key, value):
             out.append(
                 make_finding(
                     "payload-sensitive",
@@ -275,6 +408,29 @@ def check_payload(token: DecodedToken) -> list[Finding]:
                 )
             )
     return out
+
+
+# Sufixos/prefixos de METADADO sobre auth: a claim descreve o segredo, nao O e. `pwd_exp`
+# (expiracao), `password_changed_at` (timestamp), `has_password` (flag), `password_policy`
+# (objeto), `pwdLastSet` (AD), `pwd_url` (URL) sao metadados, nao credencial em claro (FP).
+_META_SUFIXOS = (
+    "_exp", "_at", "_url", "_uri", "_link", "_policy", "_changed", "lastset", "last_set",
+    "_count", "_expires", "_updated", "_ts", "_time", "_date", "_version", "_id", "_len",
+)  # fmt: skip
+_META_PREFIXOS = ("has_", "is_", "can_", "num_", "n_")
+
+
+def _valor_parece_segredo(key: str, value: Any) -> bool:
+    """A claim carrega um SEGREDO em claro (nao um metadado/flag/timestamp/URL sobre auth)?"""
+    if not isinstance(value, str) or value == "":
+        return False  # numero/bool/objeto = timestamp/flag/policy, nao segredo
+    low = key.lower().replace("-", "_")
+    if any(low.endswith(suf) for suf in _META_SUFIXOS) or any(
+        low.startswith(pre) for pre in _META_PREFIXOS
+    ):
+        return False
+    # URL de politica/troca de senha, nao a senha.
+    return not value.startswith(("http://", "https://"))
 
 
 def _walk(payload: dict[str, Any]) -> Iterator[tuple[str, str, Any]]:

@@ -45,14 +45,37 @@ _CASOS_POSITIVOS: list[tuple[str, dict, dict]] = [
     ("claim-nbf-future", {"alg": "HS256"}, {"nbf": NOW + 3600, "exp": NOW + 7200}),
     ("payload-nested-jwt", {"alg": "HS256"}, {"assertion": _INNER_JWT}),
     ("payload-sensitive", {"alg": "HS256"}, {"password": "hunter2"}),
+    ("signature-empty", {"alg": "RS256"}, {"exp": NOW + 60, "iat": NOW, "aud": "x", "iss": "y"}),
+    (
+        "claim-iat-future",
+        {"alg": "HS256"},
+        {"iat": NOW + 400 * 24 * 3600, "exp": NOW + 401 * 24 * 3600, "aud": "x", "iss": "y"},
+    ),
+    # header-duplicate-key nao cabe num dict (nao ha como repetir chave); construido a parte.
+    ("header-duplicate-key", {"alg": "HS256"}, {"sub": "a"}),
 ]
+
+
+def _token_com_alg_duplicado() -> str:
+    """JWS cru com 'alg' repetido no cabecalho (none primeiro, HS256 depois) — um dict Python
+    nao consegue expressar isso, entao o JSON e montado a mao."""
+    from chaveiro.core.jwt import b64url_encode
+
+    h = b64url_encode(b'{"alg":"none","alg":"HS256","typ":"JWT"}')
+    p = b64url_encode(b'{"sub":"a"}')
+    return f"{h}.{p}."
 
 
 @pytest.mark.parametrize(
     "check_id, header, payload", _CASOS_POSITIVOS, ids=[c[0] for c in _CASOS_POSITIVOS]
 )
 def test_cada_checagem_dispara(check_id: str, header: dict, payload: dict) -> None:
-    assert check_id in _ids(raw_token(header, payload))
+    token = (
+        _token_com_alg_duplicado()
+        if check_id == "header-duplicate-key"
+        else raw_token(header, payload)
+    )
+    assert check_id in _ids(token)
 
 
 def test_toda_checagem_do_catalogo_tem_caso_positivo() -> None:
@@ -271,5 +294,6 @@ def test_well_formed_rs_token_is_clean() -> None:
     token = raw_token(
         {"alg": "RS256", "typ": "JWT"},
         {"sub": "z", "exp": NOW + 60, "iat": NOW, "aud": "api", "iss": "auth"},
+        signature=b"\x01" * 64,
     )
     assert run_all(decode(token), NOW) == []

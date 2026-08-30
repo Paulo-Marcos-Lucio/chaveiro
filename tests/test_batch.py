@@ -28,6 +28,7 @@ def _clean_rs256(sub: str = "user") -> str:
     return raw_token(
         {"alg": "RS256", "typ": "JWT"},
         {"sub": sub, "iat": NOW - 60, "exp": NOW + 3600, "aud": "api", "iss": "https://auth"},
+        signature=b"\x01" * 64,
     )
 
 
