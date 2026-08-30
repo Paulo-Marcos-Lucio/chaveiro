@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import unicodedata
 import urllib.parse
 from collections.abc import Iterator
 from typing import Any
@@ -38,26 +39,51 @@ _SECONDS_PER_YEAR = 365 * 24 * 3600
 # nao carrega. FP (kid-b64/url/logico) e FN (A1 percent-encoded, A2 LDAP, A3 SQLi, A4 &&)
 # eram os dois lados da mesma classe: blocklist ingenua por caractere.
 _KID_TRAVERSAL = ("..", "\x00", "\n", "\r", "\t")
-_KID_INJECTION = ("'", '"', ";", "`", "$(", "<", ">", "(", ")", "*", "&&", "||", "|", "\\")
+# Metacaracteres de shell/SQL/LDAP/EL. '&' (nao so '&&'), '$', '{' e '}' entram: um kid
+# legitimo do corpus nao os carrega, mas '&' encadeia comando, e '${...}' e EL/JNDI (Log4Shell).
+_KID_INJECTION = (
+    "'", '"', ";", "`", "$(", "<", ">", "(", ")", "*", "&&", "||", "|", "\\", "&", "$", "{", "}"
+)  # fmt: skip
 _KID_SQL_RE = re.compile(r"(?i)\b(?:or|and)\b\s+[\w']+\s*=\s*[\w']+|\bunion\b|--|/\*|;\s*drop\b")
+# Expression Language / JNDI: ${jndi:ldap://...}, ${...}. So os '$' '{' '}' ja marcam, mas o
+# padrao explicito documenta a classe e sobrevive a forma percent/NFKC normalizada.
+_KID_EL_RE = re.compile(r"\$\{[^}]*\}")
+# Caminho ABSOLUTO (nao hierarquico relativo): /etc/passwd, C:\..., \\share. Um kid logico
+# ('keys/prod/1') ou URL ('https://...') nao comeca por '/'+segmento nem por drive/UNC.
+_KID_ABS_PATH_RE = re.compile(r"(?i)^(?:/[^/]|[a-z]:[\\/]|\\\\)")
+
+
+def _unquote_ate_ponto_fixo(texto: str, teto: int = 3) -> str:
+    """percent-decode em LACO ate estabilizar (double/triple-encoding: %252e -> %2e -> .).
+    Teto pequeno porque um kid legitimo nunca muda sob unquote, entao 3 passes bastam."""
+    for _ in range(teto):
+        decodificado = urllib.parse.unquote(texto)
+        if decodificado == texto:
+            break
+        texto = decodificado
+    return texto
+
+
+def _kid_candidatos(kid: str) -> set[str]:
+    """Todas as formas que um verificador pode ENXERGAR do kid: cru, percent-decodificado ate
+    ponto-fixo e normalizado NFKC (fullwidth U+FF0E/U+FF0F colapsam para '../'). A blocklist de
+    caractere isolada e um single-decode deixavam passar double-encoding, EL e homoglifo largo."""
+    formas: set[str] = set()
+    for base in (kid, _unquote_ate_ponto_fixo(kid)):
+        formas.add(base)
+        formas.add(unicodedata.normalize("NFKC", base))  # NFKC de str nunca levanta
+    return formas
 
 
 def _kid_perigoso(kid: str) -> bool:
-    """O 'kid' carrega traversal/injecao? Avalia a forma crua E a percent-decodificada
-    (um verificador que usa o kid num caminho de arquivo decodifica %2e%2e%2f -> ../)."""
-    candidatos = [kid]
-    try:
-        decodificado = urllib.parse.unquote(kid)
-        if decodificado != kid:
-            candidatos.append(decodificado)
-    except Exception:  # unquote nunca deveria falhar, mas nao derruba a auditoria
-        pass
-    for c in candidatos:
+    """O 'kid' carrega traversal/injecao/caminho absoluto? Avalia TODAS as formas normalizadas
+    (percent ate ponto-fixo + NFKC), nao so a crua e um unico unquote."""
+    for c in _kid_candidatos(kid):
         if any(t in c for t in _KID_TRAVERSAL):
             return True
         if any(t in c for t in _KID_INJECTION):
             return True
-        if _KID_SQL_RE.search(c):
+        if _KID_EL_RE.search(c) or _KID_ABS_PATH_RE.search(c) or _KID_SQL_RE.search(c):
             return True
     return False
 
@@ -102,7 +128,14 @@ _CPF = re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b|\b\d{11}\b")
 _CTY_NESTED = {"jwt", "application/jwt"}
 
 
-def run_all(token: DecodedToken, now: int) -> list[Finding]:
+# Teto de profundidade do aninhamento auditado. Nenhum JWT aninhado legitimo passa de poucas
+# camadas; o teto + a protecao de ciclo evitam laco infinito numa casca que se auto-referencia.
+_MAX_NESTED_DEPTH = 4
+
+
+def _run_camada(token: DecodedToken, now: int) -> list[Finding]:
+    """Bateria COMPLETA de checagens de UMA camada (sem descer no aninhamento — a descida e
+    do laco em run_all). Extraida para rodar identica em cada nivel de um JWT aninhado."""
     findings: list[Finding] = []
     findings += check_alg(token)
     findings += check_header(token)
@@ -111,22 +144,52 @@ def run_all(token: DecodedToken, now: int) -> list[Finding]:
     findings += check_nesting(token)
     findings += check_claims(token, now)
     findings += check_payload(token)
-    # JWT aninhado: as vulnerabilidades moram no token INTERNO (ex.: casca HS256 envolvendo
-    # miolo alg:none). Auditar so a casca perde o vetor de confusao (FN J1).
-    if token.nested:
-        try:
-            interno = decode(token.nested)
-            findings += check_alg(interno)
-        except JWTError:
-            pass
     return findings
+
+
+def run_all(token: DecodedToken, now: int) -> list[Finding]:
+    findings = _run_camada(token, now)
+    # JWT aninhado: as vulnerabilidades moram nas camadas INTERNAS (casca HS256 envolvendo um
+    # miolo alg:none a N niveis, com jku/kid/segredo dentro). Auditar so a casca — ou so 1 nivel
+    # com check_alg — cega o vetor. Descemos por `token.nested` rodando a bateria COMPLETA em
+    # cada camada, com TETO de profundidade e protecao contra ciclo (FN J1 e alem).
+    vistos = {token.raw}
+    interno_raw = token.nested
+    profundidade = 1
+    while interno_raw is not None and profundidade <= _MAX_NESTED_DEPTH:
+        if interno_raw in vistos:
+            break  # ciclo: casca que aponta para uma camada ja vista — para
+        vistos.add(interno_raw)
+        try:
+            interno = decode(interno_raw)
+        except JWTError:
+            break
+        findings += _run_camada(interno, now)
+        interno_raw = interno.nested
+        profundidade += 1
+    return findings
+
+
+def _alg_normalizado(alg: Any) -> str | None:
+    """Forma do 'alg' para COMPARACAO: sem espaco nas pontas e sem caracteres de largura zero
+    no meio — a mesma leniencia que muitas libs aplicam. None quando 'alg' nao e string; o valor
+    CRU permanece na evidencia. Fonte UNICA: check_alg e check_signature usam esta mesma funcao,
+    para 'none'+largura-zero ser reconhecido como none nas DUAS (senao vinha alg-none E um
+    signature-empty espurio com mensagem enganosa)."""
+    if not isinstance(alg, str):
+        return None
+    normalized = alg.strip()
+    for zw in _ZERO_WIDTH:
+        normalized = normalized.replace(zw, "")
+    return normalized.strip()
 
 
 def check_signature(token: DecodedToken) -> list[Finding]:
     """Assinatura vazia num algoritmo de ASSINATURA = efetivamente nao assinado (FN D1/D2)."""
     alg = token.header.get("alg")
-    if isinstance(alg, str) and alg.strip().lower() == "none":
-        return []  # 'none' ja e coberto por alg-none; assinatura vazia ali e esperada
+    normalized = _alg_normalizado(alg)
+    if normalized is not None and normalized.lower() == "none":
+        return []  # 'none' (inclusive com largura-zero) ja e coberto por alg-none
     if token.signature == b"":
         return [
             make_finding(
@@ -205,15 +268,12 @@ def check_alg(token: DecodedToken) -> list[Finding]:
     if not isinstance(alg, str) or alg.strip() == "":
         out.append(make_finding("alg-missing", "O cabeçalho não declara 'alg'."))
         return out
-    # Espaço/tabulação em volta do valor não muda a intenção: 'none ', '\tNoNe'
-    # e 'HS256 ' são o mesmo algoritmo para um verificador leniente (muitas libs
-    # fazem strip). Comparamos pela forma normalizada — mantendo o valor cru na
-    # evidência — senão 'alg: none ' escaparia do CRÍTICO para o MÉDIO de
-    # alg-unknown. O strip acompanha a leniência de caixa que já existia no none.
-    normalized = alg.strip()
-    for zw in _ZERO_WIDTH:
-        normalized = normalized.replace(zw, "")
-    normalized = normalized.strip()
+    # Espaço/tabulação/largura-zero em volta do valor não muda a intenção: 'none ',
+    # '\tNoNe', 'none​' e 'HS256 ' são o mesmo algoritmo para um verificador
+    # leniente (muitas libs fazem strip). Comparamos pela forma normalizada — mantendo
+    # o valor cru na evidência — senão 'alg: none ' escaparia do CRÍTICO para o MÉDIO de
+    # alg-unknown. Mesma normalização de check_signature (fonte única _alg_normalizado).
+    normalized = _alg_normalizado(alg) or ""
     if normalized.lower() == "none":
         out.append(
             make_finding(
@@ -355,10 +415,15 @@ def check_claims(token: DecodedToken, now: int) -> list[Finding]:
     # Sem 'iat' a vida útil é aproximada por 'agora': um token de 10 anos sem
     # 'iat' é MAIS perigoso, e era justo aí que a checagem se desligava.
     # Refresh token (Keycloak: typ=Refresh) tem vida longa POR DESIGN — nao e achado.
+    # Mas 'typ' e um campo SELF-ASSERTED, nao autenticado: um access token de 30d com
+    # scope:admin nao vira refresh so por declarar typ=Refresh. So suprimimos quando NAO
+    # ha sinais de access token (scope/scp/azp). Havendo sinal de acesso, NAO suprime.
     typ = str(token.header.get("typ", "")).strip().lower()
-    e_refresh = (
+    tem_sinais_de_acesso = any(k in payload for k in ("scope", "scp", "azp"))
+    typ_diz_refresh = (
         typ in ("refresh", "refresh+jwt") or str(payload.get("typ", "")).lower() == "refresh"
     )
+    e_refresh = typ_diz_refresh and not tem_sinais_de_acesso
     if exp is not None and not e_refresh:
         base = "exp - iat" if iat is not None else "exp - agora, sem 'iat'"
         lifetime = exp - iat if iat is not None else exp - now
@@ -388,10 +453,22 @@ def check_payload(token: DecodedToken) -> list[Finding]:
 
     `{"user": {"cpf": ...}}` é a forma mais comum de payload JWT no Brasil, então
     varrer só o primeiro nível seria falso negativo na forma que mais aparece.
+
+    Duas lentes complementares:
+      (1) SINAL DO VALOR — uma credencial reconhecivel (AKIA/sk-/ghp_/xox/AIza, PEM, URL com
+          userinfo ou webhook Slack/Discord, presigned AWS) vale por si, em QUALQUER chave —
+          ate sob chave de metadata como 'api_key_url';
+      (2) CONTEXTO DA CHAVE — sob uma chave sensivel NAO-metadata, strings (que nao sejam
+          placeholder) e numeros sob chave-nucleo sao segredo, descendo em listas/dicts.
+    A exclusao de metadata/placeholder/URL-simples permanece — a re-inclusao e por sinal, nao
+    por afrouxar o gate (que era a regressao: segredo-URL, numerico, lista e chave-metadata).
     """
     out: list[Finding] = []
-    for path, key, value in _walk(token.payload):
-        if _is_sensitive_key(key) and _valor_parece_segredo(key, value):
+    for path, key, value, sob in _walk_com_contexto(token.payload):
+        e_segredo = (isinstance(value, str) and _valor_tem_assinatura_de_credencial(value)) or (
+            sob and _folha_parece_segredo(key, value)
+        )
+        if e_segredo:
             out.append(
                 make_finding(
                     "payload-sensitive",
@@ -418,44 +495,104 @@ _META_SUFIXOS = (
     "_count", "_expires", "_updated", "_ts", "_time", "_date", "_version", "_id", "_len",
 )  # fmt: skip
 _META_PREFIXOS = ("has_", "is_", "can_", "num_", "n_")
+# Chaves de credencial NUCLEO: aqui um valor NUMERICO tambem e segredo (PIN/senha numerica).
+# Restrito (nao o _is_sensitive_key amplo) p/ 'password_expires_days: 90' seguir metadado (TN).
+_NUMERIC_SECRET_KEYS = {
+    "password", "passwd", "pwd", "senha", "secret", "client_secret",
+    "api_key", "apikey", "token", "access_token", "refresh_token", "pin", "otp",
+}  # fmt: skip
+# Assinatura FORTE de credencial no VALOR — vale por si, em QUALQUER chave (ate sob chave de
+# metadata como 'api_key_url'): re-inclui os FN que a exclusao de URL/metadata reintroduziu.
+_CRED_VALUE_RES = (
+    re.compile(r"(?:AKIA|ASIA|AGPA|AIDA|AROA|AIPA)[0-9A-Z]{12,}"),  # chaves de acesso AWS
+    re.compile(r"\bAIza[0-9A-Za-z_\-]{20,}"),                       # Google API key
+    re.compile(r"\bgithub_pat_[0-9A-Za-z_]{20,}|\bgh[opusr]_[0-9A-Za-z]{20,}"),  # GitHub PAT/token
+    re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}"),                  # Slack token
+    re.compile(r"\bsk-[0-9A-Za-z_\-]{16,}"),                        # OpenAI-style secret key
+    re.compile(r"\bsk_(?:live|test)_[0-9A-Za-z]{16,}"),            # Stripe secret key
+    re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----"),  # chave privada PEM
+)  # fmt: skip
+_WEBHOOK_HOSTS = ("hooks.slack.com", "discord.com/api/webhooks", "discordapp.com/api/webhooks")
+# userinfo na URL (basic-auth embutido scheme://user:senha@host) e presigned AWS (X-Amz-Signature).
+_USERINFO_RE = re.compile(r"://[^/\s:@]+:[^/\s:@]+@")
+_AMZ_SIG_RE = re.compile(r"(?i)[?&]x-amz-signature=")
+# Placeholder/template: NAO e o segredo. ${VAR}, <seu-segredo>, %VAR%, $VAR, mascaras (xxxx/****)
+# e palavras-molde. So exclui a string INTEIRA (ancorada) p/ nao cegar um segredo que apenas
+# CONTENHA a palavra (ex.: a chave AWS canonica 'AKIA...EXAMPLE' segue pega pela lente de valor).
+_PLACEHOLDER_RE = re.compile(
+    r"^\s*(?:"
+    r"\$?\{[^}]*\}|<[^>]*>|%[A-Za-z0-9_]+%|\$[A-Za-z_]\w*"
+    r"|x{3,}|\*{3,}|\.{3,}|-{3,}"
+    r"|changeme|change_me|redacted|placeholder|your[-_ ]?\w+|example|dummy|sample|test|none|null|n/?a"
+    r")\s*$",
+    re.IGNORECASE,
+)
 
 
-def _valor_parece_segredo(key: str, value: Any) -> bool:
-    """A claim carrega um SEGREDO em claro (nao um metadado/flag/timestamp/URL sobre auth)?"""
-    if not isinstance(value, str) or value == "":
-        return False  # numero/bool/objeto = timestamp/flag/policy, nao segredo
+def _chave_e_metadata(key: str) -> bool:
+    """A chave DESCREVE auth (flag/timestamp/URL/policy) em vez de carregar o segredo?"""
     low = key.lower().replace("-", "_")
-    if any(low.endswith(suf) for suf in _META_SUFIXOS) or any(
+    return any(low.endswith(suf) for suf in _META_SUFIXOS) or any(
         low.startswith(pre) for pre in _META_PREFIXOS
-    ):
-        return False
-    # URL de politica/troca de senha, nao a senha.
-    return not value.startswith(("http://", "https://"))
+    )
 
 
-def _walk(payload: dict[str, Any]) -> Iterator[tuple[str, str, Any]]:
-    """Percorre o payload inteiro — dicts e listas aninhados — **sem recursão**.
+def _valor_tem_assinatura_de_credencial(value: str) -> bool:
+    """O VALOR carrega, por si so, uma credencial reconhecivel — independente da chave."""
+    if any(rx.search(value) for rx in _CRED_VALUE_RES):
+        return True
+    return "://" in value and bool(
+        _USERINFO_RE.search(value)
+        or any(h in value for h in _WEBHOOK_HOSTS)
+        or _AMZ_SIG_RE.search(value)
+    )
 
-    Devolve ``(caminho, chave, valor)``; itens de lista vêm com chave vazia (não
-    têm nome, só posição). A profundidade já é limitada no decode
-    (``MAX_JSON_DEPTH``), mas a pilha explícita torna isso independente disso.
+
+def _folha_parece_segredo(key: str, value: Any) -> bool:
+    """Sob uma chave sensivel NAO-metadata: a folha carrega um segredo em claro?
+
+    String -> sim, salvo URL simples (sem credencial; a lente de valor cuida das secret-URLs) e
+    placeholder. Numero -> so quando a PROPRIA chave e credencial-nucleo (senao e count/policy,
+    ex.: 'password_expires_days: 90'). Bool/objeto -> nao.
     """
-    stack: list[tuple[str, Any]] = [("", payload)]
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return key.lower().replace("-", "_") in _NUMERIC_SECRET_KEYS
+    if isinstance(value, str):
+        if value == "" or value.startswith(("http://", "https://")):
+            return False
+        return not _PLACEHOLDER_RE.match(value)
+    return False
+
+
+def _walk_com_contexto(payload: dict[str, Any]) -> Iterator[tuple[str, str, Any, bool]]:
+    """Percorre o payload inteiro (dicts e listas aninhados) **sem recursão**.
+
+    Devolve ``(caminho, chave, valor, sob_sensivel)``. ``sob_sensivel`` marca que o valor esta
+    sob uma chave sensivel NAO-metadata — herdado para dentro de listas/dicts, para pegar segredo
+    numa lista (``api_keys: ["AKIA..."]``) ou num objeto (``secret: {"value": "..."}``). Itens de
+    lista vem com chave vazia (so posicao). A profundidade ja e limitada no decode
+    (``MAX_JSON_DEPTH``), mas a pilha explicita torna isso independente disso.
+    """
+    stack: list[tuple[str, Any, bool]] = [("", payload, False)]
     while stack:
-        prefix, node = stack.pop()
+        prefix, node, sob = stack.pop()
         if isinstance(node, dict):
             for key, value in node.items():
                 path = f"{prefix}.{key}" if prefix else str(key)
-                yield path, str(key), value
+                k = str(key)
+                sob_filho = sob or (_is_sensitive_key(k) and not _chave_e_metadata(k))
+                yield path, k, value, sob_filho
                 if isinstance(value, (dict, list)):
-                    stack.append((path, value))
+                    stack.append((path, value, sob_filho))
         elif isinstance(node, list):
             for position, value in enumerate(node):
                 path = f"{prefix}[{position}]"
                 if isinstance(value, (dict, list)):
-                    stack.append((path, value))
+                    stack.append((path, value, sob))
                 else:
-                    yield path, "", value
+                    yield path, "", value, sob
 
 
 def _is_sensitive_key(key: str) -> bool:

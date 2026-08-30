@@ -102,3 +102,117 @@ def test_nested_jwt_com_interno_none() -> None:
     tok = f"{h}.{b64url_encode(interno.encode())}.{sig}"
     ids = _ids(tok)
     assert "payload-nested-jwt" in ids and "alg-none" in ids
+
+
+# ===================================================================================
+# Segunda onda (2026-08-30): buracos que o cetico adversarial provou. Cada teste ataca
+# a CLASSE (pertinencia `in`/`not in`, com contraprova do benigno correspondente).
+# ===================================================================================
+
+
+def _wrap(interno_raw: str, **hdr: object) -> str:
+    """Casca HS256 cujo payload E o token interno (JWT aninhado real, RFC 7519 §5.2)."""
+    casca = hs_token({}, cty="JWT", **hdr)
+    h, _, sig = casca.split(".")
+    return f"{h}.{b64url_encode(interno_raw.encode())}.{sig}"
+
+
+# ---------------------- H1: aninhamento auditado RECURSIVAMENTE e por INTEIRO ----------------------
+def test_h1_alg_none_no_miolo_a_tres_niveis() -> None:
+    # Casca -> casca -> miolo alg:none. Antes so 1 nivel + so check_alg -> invisivel.
+    miolo = raw_token({"alg": "none"}, {"role": "admin"})
+    assert "alg-none" in _ids(_wrap(_wrap(miolo)))
+
+
+def test_h1_jku_kid_e_segredo_dentro_do_aninhado() -> None:
+    # A bateria COMPLETA roda em cada camada: header (jku/kid) e payload (segredo), nao so alg.
+    assert "header-jku" in _ids(
+        _wrap(raw_token({"alg": "HS256", "jku": "http://evil/keys"}, {"sub": "a"}))
+    )
+    assert "header-kid-injection" in _ids(
+        _wrap(raw_token({"alg": "HS256", "kid": "../../etc/passwd"}, {"sub": "a"}))
+    )
+    assert "payload-sensitive" in _ids(
+        _wrap(raw_token({"alg": "HS256"}, {"client_secret": "s3cr3t-real-value"}))
+    )
+
+
+def test_h1_aninhamento_nao_entra_em_laco_nem_estoura() -> None:  # contraprova: teto/ciclo
+    # Cadeia funda alem do teto termina sem crash e ainda audita as camadas dentro do teto.
+    tok = raw_token({"alg": "none"}, {"role": "admin"})
+    for _ in range(8):
+        tok = _wrap(tok)
+    ids = _ids(tok)  # nao deve levantar
+    assert "payload-nested-jwt" in ids
+
+
+# ---------------------- H2: kid — unquote ate ponto-fixo + NFKC + metacaracteres ----------------------
+def test_h2_kid_double_encoding_el_fullwidth_abspath() -> None:
+    perigosos = (
+        "%252e%252e%252fetc%252fpasswd",  # double-encoding -> ../etc/passwd
+        "app & whoami",  # '&' sozinho (nao so '&&')
+        "${jndi:ldap://evil/a}",  # EL / JNDI (Log4Shell)
+        chr(0xFF0E) * 2 + chr(0xFF0F),  # fullwidth "../" (U+FF0E/FF0F) colapsa em ../ sob NFKC
+        "/etc/passwd",  # caminho absoluto
+    )
+    for kid in perigosos:
+        assert "header-kid-injection" in _ids(hs_token({"sub": "a"}, kid=kid)), kid
+
+
+def test_h2_kid_legitimo_estavel_sob_fixpoint_e_nfkc_nao_dispara() -> None:  # contraprova
+    for kid in (
+        "abc/def+gh=",
+        "keys/prod/1",
+        "a7Bc+/dE9fG0hIjK1LmN2oPq3rS4tUv6wXyZ8A==",
+        "https://issuer.example/keys/2024",
+        "urn:example:key:2026",
+        "2019-05-01",
+    ):
+        assert "header-kid-injection" not in _ids(hs_token({"sub": "a"}, kid=kid)), kid
+
+
+# ---------------------- H3: payload-sensitive re-incluido por SINAL do valor ----------------------
+def test_h3_segredo_url_numerico_lista_e_chave_metadata() -> None:
+    casos = (
+        {"notify": "https://hooks.slack.com/services/T00/B00/XXXXXXXXXXXX"},  # webhook Slack
+        {"cb": "https://user:p4ss@host/x"},  # userinfo basic-auth
+        {"link": "https://b.s3.amazonaws.com/k?X-Amz-Signature=deadbeef"},  # presigned S3
+        {"password": 123456},  # segredo numerico
+        {"api_keys": ["AKIAIOSFODNN7EXAMPLE"]},  # lista de segredos
+        {"api_key_url": "AKIAIOSFODNN7EXAMPLE"},  # segredo sob chave _url (metadata)
+    )
+    for payload in casos:
+        assert "payload-sensitive" in _ids(hs_token(payload)), payload
+
+
+def test_h3_placeholder_e_policy_numerica_nao_disparam() -> None:  # contraprova
+    for payload in (
+        {"client_secret": "${CLIENT_SECRET}"},
+        {"secret": "<your-secret>"},
+        {"api_key": "changeme"},
+        {"settings": {"password_expires_days": 90}},
+    ):
+        assert "payload-sensitive" not in _ids(hs_token(payload)), payload
+    # e o segredo real segue pego:
+    assert "payload-sensitive" in _ids(hs_token({"client_secret": "s3cr3t-real-value"}))
+
+
+# ---------------------- H4: signature-empty x alg-none normalizado (zero-width) ----------------------
+def test_h4_none_com_zero_width_nao_gera_signature_empty() -> None:
+    ids = _ids(raw_token({"alg": "none​"}, {"sub": "a"}))  # raw_token: assinatura vazia
+    assert "alg-none" in ids and "signature-empty" not in ids
+
+
+def test_h4_rs256_com_assinatura_vazia_ainda_e_signature_empty() -> None:  # contraprova
+    assert "signature-empty" in _ids(raw_token({"alg": "RS256"}, {"sub": "a"}))
+
+
+# ---------------------- H5: long-lifetime nao e suprimido por typ:Refresh self-asserted ----------------------
+def test_h5_access_longo_com_scope_e_typ_refresh_nao_e_suprimido() -> None:
+    tok = hs_token({"exp": NOW + 30 * 24 * 3600, "iat": NOW, "scope": "admin"}, typ="Refresh")
+    assert "claim-long-lifetime" in _ids(tok)
+
+
+def test_h5_refresh_sem_sinais_de_acesso_segue_suprimido() -> None:  # contraprova
+    tok = hs_token({"exp": NOW + 30 * 24 * 3600, "iat": NOW}, typ="Refresh")
+    assert "claim-long-lifetime" not in _ids(tok)
