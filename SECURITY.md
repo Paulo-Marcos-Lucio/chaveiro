@@ -15,3 +15,7 @@ Reporte vulnerabilidades **de forma privada** para **contatopml26@gmail.com** (a
 O Chaveiro inclui ferramentas ofensivas (`crack`, `forge`, `forge-confusion`) destinadas a **testar sistemas que você possui ou tem autorização explícita e por escrito para avaliar**. O propósito é defensivo: comprovar uma falha para justificar a correção.
 
 No Brasil, o acesso não autorizado a dispositivo informático é crime (Lei 12.737/2012, agravada pela Lei 14.155/2021). Use sempre com escopo e autorização definidos.
+
+## Modelo de ameaças da suíte
+
+Como a suíte AppSec se defende de um alvo hostil — e o que ainda não está fechado — está documentado em [`modelo-de-ameacas.md`](https://github.com/Paulo-Marcos-Lucio/sentinela/blob/main/docs/modelo-de-ameacas.md), no repositório da [Sentinela](https://github.com/Paulo-Marcos-Lucio/sentinela): é ela quem tem superfície de rede (fala HTTP com o alvo escolhido pelo operador). O Chaveiro audita um token que o operador fornece (decodificado sem verificar assinatura, sem tocar a rede na auditoria) — a superfície de "resposta hostil de um alvo remoto" não se aplica a ele do mesmo jeito.
