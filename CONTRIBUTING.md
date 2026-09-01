@@ -24,3 +24,13 @@ ruff check . && ruff format --check . && mypy src && pytest
 3. Adicione um teste positivo em `tests/test_detectors.py` **e** garanta que um token bem-formado não dispara a checagem.
 
 Ataques novos (`attacks/`) devem vir com PoC reprodutível em teste.
+
+## Definição de pronto para correção de defeito
+
+Corrigir o exemplo que apareceu no relatório e chamar de resolvido não fecha
+o item: é preciso um teste que falhava contra o código anterior à correção,
+mais um invariante — property-based com Hypothesis quando a classe for uma
+família de entradas — que impeça a classe inteira de voltar. Critério e
+exemplos reais em [`docs/definicao-de-pronto.md` da
+Sentinela](https://github.com/Paulo-Marcos-Lucio/sentinela/blob/main/docs/definicao-de-pronto.md),
+válido para as cinco ferramentas da suíte, não só para ela.
