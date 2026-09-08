@@ -117,3 +117,39 @@ def test_crack_e_forge_tambem_leem_de_stdin() -> None:
     )
     assert r_forge.exit_code == 0
     assert r_forge.stdout.strip().count(".") == 2
+
+
+# --------------------------------------------------------------------------- #
+# P1-02, alvo esquecido: o SEGREDO do `forge` também não pode entrar por argv.
+# O item 2.4 corrigiu o token e deixou o segredo — um segredo HMAC no histórico
+# do shell é ainda mais grave que o token. (Auditoria 2026-09-07, FEITO-MAS-FALSO.)
+# --------------------------------------------------------------------------- #
+def test_avisa_quando_segredo_vem_por_argv() -> None:
+    token = hs_token({"sub": "a"}, secret="k")
+    result = runner.invoke(
+        app, ["forge", "-", "--secret", "supersegredo", "--set", "role=admin"], input=token
+    )
+    assert result.exit_code == 0
+    # o aviso do SEGREDO tem que existir e apontar o caminho seguro
+    assert "Segredo recebido por argumento" in result.stderr
+    assert "--secret -" in result.stderr
+
+
+def test_forge_le_segredo_de_stdin_sem_avisar() -> None:
+    # token por argv, segredo por stdin: o segredo não aparece no argv → sem aviso de segredo.
+    token = hs_token({"sub": "a"}, secret="k")
+    result = runner.invoke(
+        app, ["forge", token, "--secret", "-", "--set", "role=admin"], input="supersegredo"
+    )
+    assert result.exit_code == 0
+    forged = result.stdout.strip().splitlines()[0]
+    assert forged.count(".") == 2  # é um JWT
+    assert "Segredo recebido por argumento" not in result.stderr
+
+
+def test_forge_recusa_token_e_segredo_ambos_no_stdin() -> None:
+    # Só há um stdin: o conflito é recusado com mensagem clara, não adivinhado.
+    token = hs_token({"sub": "a"}, secret="k")
+    result = runner.invoke(app, ["forge", "-", "--secret", "-"], input=token)
+    assert result.exit_code == 2
+    assert "ambos do stdin" in result.stderr

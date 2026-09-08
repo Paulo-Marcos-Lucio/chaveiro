@@ -45,6 +45,14 @@ _AVISO_ARGV = (
     "visível na lista de processos (ps/EDR). Prefira o stdin: passe '-' e canalize "
     'o token, ex.: `echo "$TOKEN" | chaveiro inspect -`.'
 )
+# P1-02 (mesma classe, alvo esquecido): o SEGREDO do `forge` vazava por argv sem stdin
+# nem aviso. O item 2.4 do PATCH_PLAN dizia "segredo E JWT saem do argv" e corrigiu só o
+# JWT — um segredo HMAC no histórico do shell é ainda mais grave que o token.
+_AVISO_ARGV_SEGREDO = (
+    "⚠ Segredo recebido por argumento — ele fica gravado no histórico do shell e "
+    "visível na lista de processos (ps/EDR). Prefira o stdin: passe '--secret -' e "
+    'canalize o segredo, ex.: `printf %s "$SECRET" | chaveiro forge "$TOKEN" --secret -`.'
+)
 # P1-01: aviso ao ligar --claims-completas (PII do titular sai em claro).
 _AVISO_CLAIMS_COMPLETAS = (
     "⚠ --claims-completas: as claims saem em CLARO, incluindo PII do titular final "
@@ -89,6 +97,29 @@ def _resolve_token(token: str) -> str:
         return data
     err.print(f"[yellow]{_AVISO_ARGV}[/]")
     return token
+
+
+def _resolve_secret(secret: str, *, token_veio_do_stdin: bool) -> str:
+    """Resolve o segredo HMAC do ``--secret`` ou do stdin ('-'), avisando sobre o argv.
+
+    Mesma classe do :func:`_resolve_token` (P1-02): o caminho seguro (stdin) é silencioso;
+    o inseguro (argv) sempre sinaliza o risco e o comando alternativo. Como só há um stdin,
+    token e segredo não podem vir ambos por ele — o conflito é recusado, não adivinhado.
+    """
+    if secret.strip() == "-":
+        if token_veio_do_stdin:
+            err.print(
+                "[red]Token e segredo não podem vir ambos do stdin (só há um).[/] "
+                "Passe o token por argumento e o segredo por '--secret -', ou vice-versa."
+            )
+            raise typer.Exit(2)
+        data = sys.stdin.read().strip()
+        if not data:
+            err.print("[red]Nenhum segredo recebido no stdin.[/]")
+            raise typer.Exit(2)
+        return data
+    err.print(f"[yellow]{_AVISO_ARGV_SEGREDO}[/]")
+    return secret
 
 
 def _txt(value: object) -> Text:
@@ -339,7 +370,9 @@ def forge(
 ) -> None:
     """Reassina um token modificado com um segredo conhecido (teste autorizado)."""
     _aviso_autorizacao()
+    token_veio_do_stdin = token.strip() == "-"
     token = _resolve_token(token)
+    secret = _resolve_secret(secret, token_veio_do_stdin=token_veio_do_stdin)
     decoded = _decode_or_die(token)
     header = {**decoded.header, "alg": alg}
     payload = {**decoded.payload, **_parse_set(set_claims)}
