@@ -213,7 +213,8 @@ claims = validate(
 É uma **referência mínima segura**, não um verificador completo pronto para
 produção. O que ela **cobre**: allowlist obrigatória de algoritmos, rejeição de
 `none` (inclusive na allowlist), verificação de assinatura HS*/RS*/PS*/ES*/EdDSA,
-`exp`/`nbf` (com `leeway`) rejeitando NumericDate malformado (fail-closed),
+`exp` **exigido por padrão** (`require_exp`, coerente com o achado `claim-no-exp`)
+mais `nbf` (com `leeway`) rejeitando NumericDate malformado (fail-closed),
 `aud`/`iss`, `typ` quando exigido, e **falha explícita em JWT aninhado** (`cty:JWT`)
 em vez de devolver claims vazias. O que ela **não** cobre: revogação/`jti`,
 rotação e resolução de chave (JWKS/`kid`), `azp`/`nonce`/PKCE, replay e a validação

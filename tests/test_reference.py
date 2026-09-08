@@ -26,6 +26,24 @@ def test_accepts_valid_hs_token() -> None:
     assert payload["sub"] == "a"
 
 
+def test_rejeita_token_sem_exp_por_padrao() -> None:
+    # Achado (média): a referência do lado CORRETO aceitava um token assinado SEM 'exp' —
+    # o mesmo defeito 'claim-no-exp' ("nunca expira") que o detector marca no cliente.
+    # Anti-mutação: sem 'exp' -> rejeitado por padrão; require_exp=False -> aceito;
+    # com 'exp' válido -> continua aceito. Ataca a CLASSE (presença de exp), não o exemplo.
+    sem_exp = hs_token({"sub": "a", "iat": NOW}, secret=SECRET.decode())
+    with pytest.raises(InvalidToken):
+        validate(sem_exp, key=SECRET, algorithms=["HS256"], now=NOW)
+    # desligar a exigência explicitamente aceita o MESMO token (nada afrouxou por acidente)
+    assert (
+        validate(sem_exp, key=SECRET, algorithms=["HS256"], now=NOW, require_exp=False)["sub"]
+        == "a"
+    )
+    # com 'exp' válido segue aceito — a exigência não quebra o caminho feliz
+    com_exp = hs_token({"sub": "a", "exp": NOW + 60, "iat": NOW}, secret=SECRET.decode())
+    assert validate(com_exp, key=SECRET, algorithms=["HS256"], now=NOW)["sub"] == "a"
+
+
 def test_rejects_alg_none() -> None:
     token = raw_token({"alg": "none"}, {"sub": "admin"})
     with pytest.raises(InvalidToken):

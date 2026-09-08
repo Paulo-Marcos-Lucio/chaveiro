@@ -7,6 +7,8 @@ o falso positivo — ambos aqui.
 
 from __future__ import annotations
 
+import pytest
+
 from chaveiro.checks.detectors import run_all
 from chaveiro.core.jwt import b64url_encode, decode
 from tests.conftest import hs_token, raw_token
@@ -144,6 +146,57 @@ def test_h1_aninhamento_nao_entra_em_laco_nem_estoura() -> None:  # contraprova:
         tok = _wrap(tok)
     ids = _ids(tok)  # nao deve levantar
     assert "payload-nested-jwt" in ids
+
+
+# --------- Achado (media): alg:none no MIOLO alem do teto raso de 4 niveis escapava ---------
+# NB: o aninhamento REAL cresce ~1,33x por camada (o payload da casca E o token interno em
+# base64url), entao uma cadeia funda e exponencialmente grande — o proprio custo em memoria e
+# a guarda anti-DoS natural (nem o atacante consegue forjar 500 niveis). Por isso os testes
+# ficam em profundidades baratas mas MUITO alem do teto antigo (4).
+def _aninha_miolo(camadas: int) -> str:
+    """Envolve um miolo alg:none em `camadas` cascas HS256 (aninhamento REAL, RFC 7519 §5.2)."""
+    tok = raw_token({"alg": "none"}, {"role": "admin"})
+    for _ in range(camadas):
+        tok = _wrap(tok)
+    return tok
+
+
+def test_alg_none_no_miolo_e_sinalizado_em_qualquer_profundidade() -> None:
+    # Anti-mutação: o scanner tem que ALCANCAR o nucleo. O teto antigo (4) deixava o miolo
+    # a 5+ niveis passar batido. Cobrimos 5, 6 e uma cadeia bem mais funda — todas SINALIZAM.
+    for camadas in (5, 6, 20):
+        ids = _ids(_aninha_miolo(camadas))
+        assert "alg-none" in ids, camadas
+        assert "payload-nested-jwt" in ids, camadas
+
+
+def test_aninhamento_legitimo_profundo_nao_gera_falso_positivo() -> None:  # contraprova FP
+    # Cadeia funda de cascas HS256 com um miolo LEGITIMO (assinado, com exp/iat/aud/iss) nao pode
+    # inventar alg-none so por ser fundo — a descida audita, mas nada de FP.
+    miolo = hs_token(
+        {"sub": "a", "exp": NOW + 60, "iat": NOW, "aud": "api", "iss": "auth"}, secret="k"
+    )
+    tok = miolo
+    for _ in range(20):
+        tok = _wrap(tok)
+    assert "alg-none" not in _ids(tok)
+
+
+def test_guarda_anti_dos_json_hostil_continua_ativa() -> None:  # contraprova: MAX_JSON_DEPTH
+    # Descer mais fundo no aninhamento NAO pode enfraquecer a guarda de profundidade JSON
+    # (MAX_JSON_DEPTH): um segmento com aninhamento ESTRUTURAL hostil segue rejeitado (fail-closed),
+    # e uma camada interna hostil encerra a descida sem crash nem loop.
+    from chaveiro.core.jwt import MAX_JSON_DEPTH, JWTError
+
+    fundo = "{" * (MAX_JSON_DEPTH + 20)  # profundidade JSON alem do teto -> decode rejeita
+    h = b64url_encode(b'{"alg":"HS256"}')
+    p = b64url_encode(fundo.encode())
+    with pytest.raises(JWTError):
+        decode(f"{h}.{p}.")
+    # a mesma camada hostil aninhada dentro de uma casca: a auditoria termina, sem levantar
+    interno_hostil = f"{h}.{p}."
+    ids = _ids(_wrap(interno_hostil))  # nao deve levantar
+    assert "payload-nested-jwt" in ids  # a casca ainda e sinalizada como aninhada
 
 
 # ---------------------- H2: kid — unquote ate ponto-fixo + NFKC + metacaracteres ----------------------

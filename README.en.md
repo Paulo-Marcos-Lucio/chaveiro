@@ -185,7 +185,7 @@ claims = validate(
 )
 ```
 
-It is a **minimal secure reference**, not a complete, production-ready verifier. What it **covers**: mandatory algorithm allowlist, rejection of `none` (even if it's in the allowlist), HS*/RS*/PS*/ES*/EdDSA signature verification, `exp`/`nbf` (with `leeway`) rejecting a malformed NumericDate (fail-closed), `aud`/`iss`, `typ` when required, and **explicit failure on a nested JWT** (`cty:JWT`) instead of returning empty claims. What it does **not** cover: revocation/`jti`, key rotation and resolution (JWKS/`kid`), `azp`/`nonce`/PKCE, replay, and validating the second layer of a nested token. Adapt it to your stack — it's the material I hand the client together with the diagnosis, not a drop-in.
+It is a **minimal secure reference**, not a complete, production-ready verifier. What it **covers**: mandatory algorithm allowlist, rejection of `none` (even if it's in the allowlist), HS*/RS*/PS*/ES*/EdDSA signature verification, `exp` **required by default** (`require_exp`, consistent with the `claim-no-exp` finding) plus `nbf` (with `leeway`) rejecting a malformed NumericDate (fail-closed), `aud`/`iss`, `typ` when required, and **explicit failure on a nested JWT** (`cty:JWT`) instead of returning empty claims. What it does **not** cover: revocation/`jti`, key rotation and resolution (JWKS/`kid`), `azp`/`nonce`/PKCE, replay, and validating the second layer of a nested token. Adapt it to your stack — it's the material I hand the client together with the diagnosis, not a drop-in.
 
 ---
 

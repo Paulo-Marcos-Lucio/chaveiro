@@ -128,9 +128,18 @@ _CPF = re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b|\b\d{11}\b")
 _CTY_NESTED = {"jwt", "application/jwt"}
 
 
-# Teto de profundidade do aninhamento auditado. Nenhum JWT aninhado legitimo passa de poucas
-# camadas; o teto + a protecao de ciclo evitam laco infinito numa casca que se auto-referencia.
-_MAX_NESTED_DEPTH = 4
+# Teto de profundidade do aninhamento AUDITADO. Distinto de MAX_JSON_DEPTH (que limita o
+# aninhamento ESTRUTURAL de UM header/payload); este limita quantas CAMADAS de JWT-dentro-de-JWT
+# a bateria desce. O teto antigo (4) era baixo demais: um miolo alg:none a 5+ niveis escapava
+# (o scanner parava antes de chegar no nucleo). A correcao de classe e alcancar o nucleo em
+# QUALQUER profundidade plausivel. E seguro descer fundo porque: (1) o payload de cada camada E,
+# base64url-decodificado, o token da camada seguinte, entao cada camada e ESTRITAMENTE menor que a
+# sua casca (o token externo cresce ~1,33x por nivel) — a profundidade real de qualquer token e
+# naturalmente ~log(tamanho), da ordem de dezenas mesmo num token de MB; (2) a protecao de ciclo
+# (`vistos`) corta uma casca que se auto-referencia; (3) um `decode` que falha encerra a descida.
+# O teto alto e explicito e cinto-e-suspensorio contra um patologico que fuja de (1)-(3), sem
+# reintroduzir o FN de parar raso.
+_MAX_NESTED_DEPTH = 512
 
 
 def _run_camada(token: DecodedToken, now: int) -> list[Finding]:

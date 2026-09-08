@@ -52,6 +52,7 @@ def validate(
     now: int | None = None,
     leeway: int = 0,
     typ: str | None = None,
+    require_exp: bool = True,
 ) -> dict[str, Any]:
     """Valida um JWT com política estrita e devolve o payload confiável.
 
@@ -65,6 +66,13 @@ def validate(
     7519 §5.2) é rejeitado explicitamente: esta referência valida uma camada, e
     devolver o payload vazio da casca como se fosse confiável seria fail-open —
     valide as duas camadas separadamente.
+
+    ``require_exp`` (padrão ``True``): um token **sem** ``exp`` é rejeitado. É a
+    boa prática que o próprio detector cobra (``claim-no-exp``: "nunca expira") —
+    uma referência do lado *correto* não pode aceitar em silêncio o mesmo defeito
+    que sinaliza no cliente. Só desligue (``require_exp=False``) quando o modelo
+    de token realmente não usa expiração (ex.: casado com revogação por ``jti``);
+    aí a responsabilidade de limitar a validade passa a ser sua.
     """
     if not algorithms:
         raise InvalidToken("defina uma allowlist de algoritmos (nunca aceite o alg do token)")
@@ -87,7 +95,12 @@ def validate(
     else:
         raise InvalidToken(f"algoritmo não suportado pela referência: {alg!r}")
 
-    _check_time(decoded.payload, now if now is not None else int(time.time()), leeway)
+    _check_time(
+        decoded.payload,
+        now if now is not None else int(time.time()),
+        leeway,
+        require_exp=require_exp,
+    )
     _check_audience(decoded.payload, audience)
     _check_issuer(decoded.payload, issuer)
     return decoded.payload
@@ -127,16 +140,25 @@ def _check_typ(header: dict[str, Any], expected: str | None) -> None:
         raise InvalidToken(f"cabeçalho 'typ' inválido: esperava {expected!r}, veio {actual!r}")
 
 
-def _check_time(payload: dict[str, Any], now: int, leeway: int) -> None:
-    """Confere 'exp'/'nbf' — e **rejeita** claim temporal malformada.
+def _check_time(payload: dict[str, Any], now: int, leeway: int, *, require_exp: bool) -> None:
+    """Confere 'exp'/'nbf' — exige 'exp' por padrão e **rejeita** claim temporal malformada.
 
     RFC 7519 §2 define NumericDate como número. Uma claim presente mas não
     numérica (``exp: "1"``) tem que ser erro, nunca ausência: tratá-la como
     ausente é falhar aberto, e um token com ``exp`` em string passaria a nunca
     expirar. ``bool`` é `int` em Python e também não é NumericDate.
+
+    ``exp`` **ausente** é tratado como fail-closed quando ``require_exp``: um
+    token sem expiração nunca vence, o mesmo defeito que o detector marca como
+    ``claim-no-exp``. ``_numeric_date`` devolve ``None`` só quando a claim está
+    ausente (presente-mas-malformada levanta), então distinguir os dois casos é
+    seguro.
     """
     exp = _numeric_date(payload, "exp")
-    if exp is not None and now > exp + leeway:
+    if exp is None:
+        if require_exp:
+            raise InvalidToken("token sem 'exp': um token que nunca expira é rejeitado por padrão")
+    elif now > exp + leeway:
         raise InvalidToken("token expirado (exp)")
     nbf = _numeric_date(payload, "nbf")
     if nbf is not None and now + leeway < nbf:
