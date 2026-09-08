@@ -91,6 +91,17 @@ CATALOG: dict[str, CheckMeta] = {
             "CWE-347",
         ),
         CheckMeta(
+            "payload-duplicate-key",
+            "Payload com chave repetida (ambiguidade de parser)",
+            Severity.HIGH,
+            "O payload repete uma chave (ex.: dois 'role', dois 'exp'). Parsers divergem (primeiro "
+            "x ultimo vence): um verificador le 'role: user'/expirado e outro le 'role: admin'/"
+            "valido a partir do MESMO token — bypass de autorizacao ou de expiracao. Rejeite tokens "
+            "com claims repetidas.",
+            "A07:2025 Authentication Failures",
+            "CWE-347",
+        ),
+        CheckMeta(
             "claim-no-exp",
             "Sem expiração (claim 'exp' ausente)",
             Severity.HIGH,

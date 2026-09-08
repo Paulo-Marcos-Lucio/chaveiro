@@ -49,6 +49,7 @@ Chaveiro covers these vectors from both sides: it **audits** a token, **proves**
 | `header-jku` / `header-x5u` | Key loaded from a URL in the token → **SSRF** / key injection | 🟠 High | A01 · CWE-918 |
 | `header-jwk` | Embedded public key (attacker supplies their own) | 🟠 High | A07 · CWE-347 |
 | `header-kid-injection` | `kid` with `../`, `'`, `;` → path traversal / SQLi | 🟠 High | A05 · CWE-91 |
+| `header-duplicate-key` / `payload-duplicate-key` | Repeated key in the **header or the payload** — parsers disagree (first vs. last wins): one verifier reads `role: user`/expired while another reads `role: admin`/valid from the **same** token | 🟠 High | A07 · CWE-347 |
 | `header-zip-jws` | `zip` (compression) in a JWS — violates the RFC, opens a decompression DoS (Apache James case) | 🟠 High | A06 · CWE-409 |
 | `claim-no-exp` / `claim-long-lifetime` | Token that never expires / lives too long | 🟠/🟡 | A07 · CWE-613 |
 | `claim-malformed-time` | `exp`/`nbf` present but not numeric → verifier fails open | 🟡 Medium | A07 · CWE-613 |
@@ -77,7 +78,9 @@ python bench/avaliar.py     # measures recall + 95% CI and false positives
 
 The corpus **is not the field**: the tokens were planted by whoever wrote the tool, so the number measures *coverage of known vectors*, not accuracy against production traffic. See `bench/README.md` for what it covers and what it does **not** cover.
 
-**Known false positive (transparency, not a showcase):** the `payload-sensitive` detector matches `secret` as a *substring* of the claim name, on purpose, to catch real compound forms (`client_secret`, `db_secret`, `dbSecret`). The cost is that a claim named `secretary` also gets flagged. It's a **low**-severity warning, never a bypass — but I'd rather document it here than decide for you that you wouldn't notice.
+**Low-false-positive calibration (how `payload-sensitive` decides):** the **claim-name** trigger matches on a name *token*, not a loose substring — `client_secret`/`db_secret`/`dbSecret` fire, but `secretary`, `discard` and the like do **not**. A sensitive key that **ends in a resource descriptor** (`_name`/`_type`/`_uid`/`_namespace`/`_kind`/`_ref`, with `.`/`/`/`-` normalized) describes *metadata*, not the secret itself — the legacy Kubernetes ServiceAccount token stamps `kubernetes.io/serviceaccount/secret.name = admin-user-token-6gl6l` (the **name** of the Secret object, not the credential), so it is no longer flagged. Regardless of the key, the **value** trigger still holds: a strong credential signature (`AKIA…`, `ghp_…`, `sk-…`, PEM, Slack webhook) fires under **any** claim name — including under a descriptor key — so no real secret slips through the calibration.
+
+**`claim-long-lifetime` and refresh tokens:** a refresh token is long-lived by design and shouldn't become a finding. Recognition doesn't depend on the field name: it covers the mainstream library conventions — `typ` (Keycloak), `type` (Flask-JWT-Extended), and `token_type` (djangorestframework-simplejwt) with value `refresh`. `typ` is *self-asserted*, so suppression only applies when there are **no** access-token signals (`scope`/`scp`/`azp`): a 30-day access token with `scope: admin` does **not** get a free pass just by declaring itself `refresh`.
 
 ---
 
@@ -149,7 +152,7 @@ chaveiro regras          # 'rules' still works as an alias
 
 **Claims privacy (LGPD).** A customer's JWT routinely carries PII belonging to the **end data subject** (`sub`, `email`, `cpf`, name). By default, the report **redacts** identity claims and any value that looks like an email/CPF, while keeping visible the structural claims the audit needs (`exp`, `iat`, `nbf`, `iss`, `aud`, `jti`, `typ`, `kid`). Use `--claims-completas` to see everything in the clear — it's explicit opt-in, with a warning, because whoever records the report becomes the operator of that data.
 
-The JSON envelope also carries `commit`, `ruleset_hash` (sha256 of the checks catalog), and `artifact_sha256` (self-verifiable), so the report can be tied back to the code and rules that produced it.
+The JSON envelope also carries `commit`, `ruleset_hash` (sha256 of the checks catalog), and `artifact_sha256` (self-verifiable), so the report can be tied back to the code and rules that produced it. `commit` is the SHA of the **tool itself** (Chaveiro audits a token, it doesn't scan a repository), resolved from the git of the **package directory** — never from the directory you invoked the CLI from, otherwise running `chaveiro` inside another git repository would stamp that repo's HEAD.
 
 > **To recompute `artifact_sha256`:** the hash is over the JSON's **UTF-8 bytes** (the catalog is in Portuguese, with accented characters). On Windows, `open(caminho)` reads as cp1252 and produces a false "tampered" result — read the file as UTF-8 before recomputing: `open(caminho, "rb").read().decode("utf-8")`.
 
@@ -167,7 +170,7 @@ None of this is mandatory: Chaveiro runs on the defaults. Change something only 
 | `--no-defaults` | `crack` | off | test **only** your wordlist, without the built-in list |
 | `--set key=value` | `forge`, `forge-confusion` | — | edit claims in the PoC (repeatable: `--set sub=admin --set role=admin`) |
 | `--alg` | `forge`, `forge-confusion` | `HS256` | forge with a different HMAC (`HS384`/`HS512`) |
-| `CHAVEIRO_COMMIT` (env) | all | `git rev-parse HEAD` | pin the provenance SHA when running from an installed package (no `.git`) |
+| `CHAVEIRO_COMMIT` (env) | all | `git rev-parse HEAD` in the package directory | pin the provenance SHA when running from an installed package (no `.git`) — only accepted if it is a 40-hex SHA (`^[0-9a-f]{40}$`); a malformed value (`HEAD`, a truncated SHA) is ignored, not stamped |
 
 ### The fix side — minimal secure reference
 

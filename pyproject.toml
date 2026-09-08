@@ -34,6 +34,7 @@ dev = [
   "ruff>=0.14",
   "mypy>=1.14",
   "hypothesis>=6.100",
+  "pyjwt>=2.0",
 ]
 
 [project.urls]

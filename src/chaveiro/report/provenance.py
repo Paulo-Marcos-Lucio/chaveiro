@@ -5,8 +5,13 @@ qual versão do Chaveiro nem com qual conjunto de checagens ele foi gerado, nem
 detectar adulteração posterior. Três campos resolvem isso:
 
 - ``commit`` — o SHA do código que rodou (env ``CHAVEIRO_COMMIT`` → ``git
-  rev-parse HEAD`` → ``None``). Em pacote instalado sem git, cai em ``None`` sem
-  quebrar.
+  rev-parse HEAD`` **no diretório do próprio pacote** → ``None``). O Chaveiro
+  audita um TOKEN, não varre um repositório: a identidade a carimbar é sempre a
+  da FERRAMENTA que rodou, resolvida pelo diretório do pacote (``__file__``), e
+  nunca pelo diretório de trabalho de onde o operador chamou o CLI — do
+  contrário, rodar ``chaveiro`` de dentro de outro repositório git carimbaria o
+  HEAD daquele repositório, silenciosamente errado. Em pacote instalado sem git,
+  cai em ``None`` sem quebrar.
 - ``ruleset_hash`` — sha256 do catálogo de checagens. Muda quando qualquer regra
   muda; dois laudos com o mesmo hash foram medidos com as mesmas regras.
 - ``artifact_sha256`` — sha256 do próprio documento (sem o campo), canônico. O
@@ -18,17 +23,30 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from chaveiro.checks.catalog import CATALOG, OWASP_EDITION
 
+# SHA de commit é 40 hex minúsculos. Um valor fora desse formato (env com "HEAD",
+# "v2" ou SHA truncado) NÃO é rastreabilidade: carimbá-lo daria aparência falsa de
+# proveniência a um laudo não rastreável, então é IGNORADO em vez de propagado.
+_SHA40 = re.compile(r"^[0-9a-f]{40}$")
 
-def _git_head() -> str | None:
-    """SHA do HEAD via git, ou ``None`` se não houver repositório/git disponível."""
+
+def _git_head(base: Path) -> str | None:
+    """``git -C <base> rev-parse HEAD``, ou ``None`` se não houver repositório/git.
+
+    ``base`` é o diretório consultado pelo git — quem responde é o CÓDIGO que rodou
+    (o diretório do pacote), não o diretório de trabalho do operador. Sem git no
+    PATH, fora de um repositório ou com o git travado, o resultado é ``None``: uma
+    auditoria jamais falha por causa do carimbo.
+    """
     try:
         proc = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            ["git", "-C", str(base), "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
             timeout=3,
@@ -36,20 +54,28 @@ def _git_head() -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    sha = proc.stdout.strip()
-    return sha if proc.returncode == 0 and sha else None
+    if proc.returncode != 0:
+        return None
+    sha = proc.stdout.strip().lower()
+    return sha if _SHA40.match(sha) else None
 
 
 def commit() -> str | None:
-    """Identidade do código: variável de ambiente tem prioridade sobre o git.
+    """Identidade do código que rodou: variável de ambiente tem prioridade sobre o git.
 
     ``CHAVEIRO_COMMIT`` existe para o caso do pacote instalado (sem .git) ou de CI
-    que já conhece o SHA e não quer pagar um subprocesso por laudo.
+    que já conhece o SHA e não quer pagar um subprocesso por laudo — mas só é aceito
+    se for um SHA de 40 hex (``^[0-9a-f]{40}$``); um valor malformado é ignorado.
+
+    Sem env válida, o SHA é resolvido pelo git do DIRETÓRIO DO PACOTE
+    (``Path(__file__).resolve().parent``), não pelo CWD: o Chaveiro audita um token,
+    então o commit a carimbar é o da própria ferramenta, e rodar de dentro de outro
+    repositório git não pode carimbar o HEAD daquele repositório.
     """
-    env = os.environ.get("CHAVEIRO_COMMIT", "").strip()
-    if env:
+    env = os.environ.get("CHAVEIRO_COMMIT", "").strip().lower()
+    if _SHA40.match(env):
         return env
-    return _git_head()
+    return _git_head(Path(__file__).resolve().parent)
 
 
 def ruleset_hash() -> str:

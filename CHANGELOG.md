@@ -3,6 +3,51 @@
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
 [SemVer](https://semver.org/lang/pt-BR/).
 
+## [Não lançado]
+
+### Adicionado
+
+- **Nova checagem `payload-duplicate-key`** (HIGH · A07:2025 · CWE-347): chave repetida no **payload**,
+  simétrica à `header-duplicate-key` que já existia. `json.loads` fica com a *última* ocorrência; um parser
+  *first-wins* fica com a *primeira* — a divergência é o ataque. Um `role`/`exp`/`aud` duplicado deixa um
+  verificador ler `user`/expirado e outro `admin`/válido a partir do **mesmo** token. O achado do payload não
+  é menos severo que o do cabeçalho porque é o payload que carrega as claims de autorização e expiração. A
+  checagem de segmento foi generalizada para rodar idêntica nos dois segmentos (cabeçalho e payload). Coberta
+  por caso positivo dedicado, meta-teste de catálogo e teste property-based (Hypothesis) sobre a invariante
+  "qualquer segmento com chave repetida ⇒ pelo menos um achado".
+
+### Corrigido
+
+- **`payload-sensitive` — descritor de recurso deixa de ser falso-positivo**: uma chave-sensível terminada em
+  **descritor** (`_name`/`_type`/`_uid`/`_namespace`/`_kind`/`_ref`, com `.`/`/`/`-` normalizados para `_`)
+  descreve um *metadado*, não carrega o segredo. O token legado de ServiceAccount do Kubernetes carimba
+  `kubernetes.io/serviceaccount/secret.name = admin-user-token-6gl6l` (o **nome** do objeto Secret) e disparava
+  MÉDIA indevida. O gate por **valor** (assinatura forte `AKIA…`/`ghp_…`/`sk-…`/PEM/webhook) continua valendo
+  sob **qualquer** chave, para não cegar um segredo real que apareça sob uma chave-descritor.
+- **`claim-long-lifetime` — refresh token reconhecido por convenção de biblioteca**: a supressão para refresh
+  token não depende mais do nome do campo `typ`. Reconhece as convenções mainstream — `typ` (Keycloak),
+  `type` (Flask-JWT-Extended) e `token_type` (djangorestframework-simplejwt) com valor `refresh`
+  (case-insensitive) —, mantendo **intocado** o gate anti-abuso: só suprime quando **não** há sinais de access
+  token (`scope`/`scp`/`azp`); um access token de 30 dias com `scope: admin` não ganha isenção só por se
+  declarar `refresh`.
+- **Proveniência: `commit` resolvido pelo diretório do pacote, não pelo CWD**: o Chaveiro audita um token (não
+  varre um repositório), então o `commit` do envelope é o SHA da **própria ferramenta**. Antes, `git rev-parse
+  HEAD` rodava sem `-C`, herdando o diretório de trabalho — rodar `chaveiro` de dentro de outro repositório git
+  carimbava o HEAD daquele repo (silenciosamente errado). Agora o git é consultado no diretório do pacote
+  (`Path(__file__).resolve().parent`, via `git -C`), e `CHAVEIRO_COMMIT` só é aceito se for um SHA de 40 hex
+  (`^[0-9a-f]{40}$`) — um valor malformado (`HEAD`, SHA truncado) é ignorado em vez de carimbado. Invariante
+  travada por teste (revert→vermelho): rodando de dentro de um repositório git qualquer, o commit carimbado é o
+  do pacote, nunca o do CWD.
+
+### Documentação
+
+- **README (PT/EN) realinhado**: nova linha de catálogo para a classe *parser-differential*
+  (`header-duplicate-key` / `payload-duplicate-key`); a nota de falso-positivo do `payload-sensitive` virou
+  **calibração de baixo falso-positivo** (casamento por token de nome — `secretary`/`discard` não disparam —,
+  descritor de recurso como metadado, e o gate por valor sob qualquer chave), somada à calibração de refresh
+  token do `claim-long-lifetime`; e a seção de proveniência e a linha `CHAVEIRO_COMMIT` passaram a descrever a
+  resolução do commit pelo diretório do pacote e o gate de 40 hex.
+
 ## [0.5.0] — 2026-08-05
 
 ### Adicionado

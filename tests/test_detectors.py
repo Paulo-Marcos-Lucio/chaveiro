@@ -51,8 +51,9 @@ _CASOS_POSITIVOS: list[tuple[str, dict, dict]] = [
         {"alg": "HS256"},
         {"iat": NOW + 400 * 24 * 3600, "exp": NOW + 401 * 24 * 3600, "aud": "x", "iss": "y"},
     ),
-    # header-duplicate-key nao cabe num dict (nao ha como repetir chave); construido a parte.
+    # duplicate-key (header/payload) nao cabe num dict (nao ha como repetir chave); a parte.
     ("header-duplicate-key", {"alg": "HS256"}, {"sub": "a"}),
+    ("payload-duplicate-key", {"alg": "HS256"}, {"sub": "a"}),
 ]
 
 
@@ -66,15 +67,27 @@ def _token_com_alg_duplicado() -> str:
     return f"{h}.{p}."
 
 
+def _token_com_claim_duplicada() -> str:
+    """JWS cru com 'role' repetido no PAYLOAD (user primeiro, admin depois)."""
+    from chaveiro.core.jwt import b64url_encode
+
+    h = b64url_encode(b'{"alg":"HS256","typ":"JWT"}')
+    p = b64url_encode(b'{"sub":"a","role":"user","role":"admin"}')
+    return f"{h}.{p}."
+
+
+_CONSTRUTORES_ESPECIAIS = {
+    "header-duplicate-key": _token_com_alg_duplicado,
+    "payload-duplicate-key": _token_com_claim_duplicada,
+}
+
+
 @pytest.mark.parametrize(
     "check_id, header, payload", _CASOS_POSITIVOS, ids=[c[0] for c in _CASOS_POSITIVOS]
 )
 def test_cada_checagem_dispara(check_id: str, header: dict, payload: dict) -> None:
-    token = (
-        _token_com_alg_duplicado()
-        if check_id == "header-duplicate-key"
-        else raw_token(header, payload)
-    )
+    construtor = _CONSTRUTORES_ESPECIAIS.get(check_id)
+    token = construtor() if construtor else raw_token(header, payload)
     assert check_id in _ids(token)
 
 

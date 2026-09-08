@@ -211,10 +211,12 @@ def check_signature(token: DecodedToken) -> list[Finding]:
     return []
 
 
-def _header_primeira_ocorrencia(raw_token: str) -> tuple[dict[str, Any], set[str]]:
-    """Reparse do cabecalho preservando a PRIMEIRA ocorrencia de cada chave e coletando as
-    repetidas. json.loads fica com a ULTIMA; parsers first-wins ficam com a primeira — a
-    diferenca e o ataque (FN F1/F2)."""
+def _segmento_primeira_ocorrencia(raw_token: str, idx: int) -> tuple[dict[str, Any], set[str]]:
+    """Reparse do segmento `idx` (0 = cabecalho, 1 = payload) preservando a PRIMEIRA ocorrencia
+    de cada chave e coletando as repetidas. json.loads fica com a ULTIMA; parsers first-wins ficam
+    com a primeira — a diferenca e o ataque (FN F1/F2). A checagem e SIMETRICA entre os dois
+    segmentos: uma chave repetida no payload (role/exp/aud...) e tao explorabel quanto uma no
+    cabecalho, entao roda identica nos dois indices."""
     repetidas: set[str] = set()
 
     def _first_wins(pares: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -226,46 +228,69 @@ def _header_primeira_ocorrencia(raw_token: str) -> tuple[dict[str, Any], set[str
                 d[k] = v
         return d
 
-    seg = raw_token.split(".", 1)[0]
+    seg = raw_token.split(".")[idx]
     dados = json.loads(b64url_decode(seg), object_pairs_hook=_first_wins)
     return (dados if isinstance(dados, dict) else {}), repetidas
 
 
 def check_header_duplicates(token: DecodedToken) -> list[Finding]:
-    """Chave de cabecalho repetida: parser-differential. Avalia tambem a interpretacao
-    first-wins (que json.loads descartou) para alg/kid — a mais perigosa das duas vence."""
+    """Chave repetida num segmento (parser-differential), no CABECALHO **ou** no PAYLOAD.
+
+    json.loads fica com a ULTIMA ocorrencia; um parser first-wins fica com a PRIMEIRA — a divergencia
+    e o ataque (FN F1/F2). A checagem e simetrica: um `role`/`exp` duplicado no payload e tao
+    explorabel quanto um `alg` duplicado no cabecalho — o payload carrega as claims de autorizacao e
+    expiracao, por isso o achado de payload nao e menos severo que o de cabecalho. So no cabecalho
+    ainda revelamos alg:none / kid perigoso escondidos sob a interpretacao first-wins.
+    """
     out: list[Finding] = []
+    # Segmento 0: cabecalho. Ja decodificou com sucesso em `decode`, entao o reparse plano nao
+    # deveria falhar; o try guarda o caso patologico sem impedir a checagem do payload.
     try:
-        primeiro, repetidas = _header_primeira_ocorrencia(token.raw)
+        primeiro, repetidas = _segmento_primeira_ocorrencia(token.raw, 0)
     except (JWTError, ValueError):
-        return out
-    if not repetidas:
-        return out
-    out.append(
-        make_finding(
-            "header-duplicate-key",
-            f"O cabecalho repete a(s) chave(s) {sorted(repetidas)!r}. Parsers divergem sobre "
-            "qual valor vale (primeiro x ultimo) — um atacante explora a diferenca.",
-            evidence=f"repetidas={sorted(repetidas)!r}",
-        )
-    )
-    alg_primeiro = primeiro.get("alg")
-    if isinstance(alg_primeiro, str) and alg_primeiro.strip().lower() == "none":
+        primeiro, repetidas = {}, set()
+    if repetidas:
         out.append(
             make_finding(
-                "alg-none",
-                "Sob interpretacao first-wins do cabecalho duplicado, 'alg' e 'none' — token "
-                "nao assinado para uma parte dos verificadores.",
-                evidence=f"alg(primeiro)={alg_primeiro!r}",
+                "header-duplicate-key",
+                f"O cabecalho repete a(s) chave(s) {sorted(repetidas)!r}. Parsers divergem sobre "
+                "qual valor vale (primeiro x ultimo) — um atacante explora a diferenca.",
+                evidence=f"repetidas={sorted(repetidas)!r}",
             )
         )
-    kid_primeiro = primeiro.get("kid")
-    if isinstance(kid_primeiro, str) and _kid_perigoso(kid_primeiro):
+        alg_primeiro = primeiro.get("alg")
+        if isinstance(alg_primeiro, str) and alg_primeiro.strip().lower() == "none":
+            out.append(
+                make_finding(
+                    "alg-none",
+                    "Sob interpretacao first-wins do cabecalho duplicado, 'alg' e 'none' — token "
+                    "nao assinado para uma parte dos verificadores.",
+                    evidence=f"alg(primeiro)={alg_primeiro!r}",
+                )
+            )
+        kid_primeiro = primeiro.get("kid")
+        if isinstance(kid_primeiro, str) and _kid_perigoso(kid_primeiro):
+            out.append(
+                make_finding(
+                    "header-kid-injection",
+                    "Sob interpretacao first-wins do cabecalho duplicado, o 'kid' contem traversal/injecao.",
+                    evidence=f"kid(primeiro)={kid_primeiro!r}",
+                )
+            )
+    # Segmento 1: payload. Num JWT aninhado o payload E um JWS compacto (nao JSON) e o json.loads
+    # levanta ValueError — capturado, sem achado espurio.
+    try:
+        _, repetidas_payload = _segmento_primeira_ocorrencia(token.raw, 1)
+    except (JWTError, ValueError):
+        repetidas_payload = set()
+    if repetidas_payload:
         out.append(
             make_finding(
-                "header-kid-injection",
-                "Sob interpretacao first-wins do cabecalho duplicado, o 'kid' contem traversal/injecao.",
-                evidence=f"kid(primeiro)={kid_primeiro!r}",
+                "payload-duplicate-key",
+                f"O payload repete a(s) chave(s) {sorted(repetidas_payload)!r}. Parsers divergem "
+                "sobre qual valor vale (primeiro x ultimo): um `role`/`exp`/`aud` duplicado deixa um "
+                "verificador ler 'user'/expirado e outro ler 'admin'/valido a partir do MESMO token.",
+                evidence=f"repetidas={sorted(repetidas_payload)!r}",
             )
         )
     return out
@@ -423,15 +448,18 @@ def check_claims(token: DecodedToken, now: int) -> list[Finding]:
 
     # Sem 'iat' a vida útil é aproximada por 'agora': um token de 10 anos sem
     # 'iat' é MAIS perigoso, e era justo aí que a checagem se desligava.
-    # Refresh token (Keycloak: typ=Refresh) tem vida longa POR DESIGN — nao e achado.
-    # Mas 'typ' e um campo SELF-ASSERTED, nao autenticado: um access token de 30d com
-    # scope:admin nao vira refresh so por declarar typ=Refresh. So suprimimos quando NAO
-    # ha sinais de access token (scope/scp/azp). Havendo sinal de acesso, NAO suprime.
+    # Refresh token tem vida longa POR DESIGN — nao e achado (suprimido abaixo).
     typ = str(token.header.get("typ", "")).strip().lower()
     tem_sinais_de_acesso = any(k in payload for k in ("scope", "scp", "azp"))
-    typ_diz_refresh = (
-        typ in ("refresh", "refresh+jwt") or str(payload.get("typ", "")).lower() == "refresh"
+    # Nome do campo de tipo varia por biblioteca — o valor 'refresh' e a convencao, nao o nome.
+    # Flask-JWT-Extended emite a claim 'type'; djangorestframework-simplejwt emite 'token_type';
+    # Keycloak usa o header 'typ' (e alguns tokens custom a claim 'typ'). Reconhecer os tres
+    # nomes evita amarrar a supressao a um campo especifico (a classe, nao o exemplo).
+    typ_diz_refresh = typ in ("refresh", "refresh+jwt") or any(
+        str(payload.get(k, "")).strip().lower() == "refresh" for k in ("typ", "type", "token_type")
     )
+    # 'typ' e SELF-ASSERTED: um access token de 30d com scope:admin nao vira refresh so por se
+    # declarar refresh. So suprimimos quando NAO ha sinais de access token (scope/scp/azp).
     e_refresh = typ_diz_refresh and not tem_sinais_de_acesso
     if exp is not None and not e_refresh:
         base = "exp - iat" if iat is not None else "exp - agora, sem 'iat'"
@@ -499,9 +527,14 @@ def check_payload(token: DecodedToken) -> list[Finding]:
 # Sufixos/prefixos de METADADO sobre auth: a claim descreve o segredo, nao O e. `pwd_exp`
 # (expiracao), `password_changed_at` (timestamp), `has_password` (flag), `password_policy`
 # (objeto), `pwdLastSet` (AD), `pwd_url` (URL) sao metadados, nao credencial em claro (FP).
+# Os DESCRITORES DE RECURSO (`_name`/`_type`/`_uid`/`_namespace`/`_kind`/`_ref`) nomeiam/tipam
+# um objeto secret/token/key — ex.: o k8s legacy carimba `.../secret.name`='admin-token-6gl6l'
+# (o NOME do Secret, nao a credencial). Metadado, nao segredo; o valor real, se aparecer, ainda
+# dispara pela lente de VALOR (_valor_tem_assinatura_de_credencial), que independe da chave.
 _META_SUFIXOS = (
     "_exp", "_at", "_url", "_uri", "_link", "_policy", "_changed", "lastset", "last_set",
     "_count", "_expires", "_updated", "_ts", "_time", "_date", "_version", "_id", "_len",
+    "_name", "_type", "_uid", "_namespace", "_kind", "_ref",
 )  # fmt: skip
 _META_PREFIXOS = ("has_", "is_", "can_", "num_", "n_")
 # Chaves de credencial NUCLEO: aqui um valor NUMERICO tambem e segredo (PIN/senha numerica).
@@ -539,8 +572,14 @@ _PLACEHOLDER_RE = re.compile(
 
 
 def _chave_e_metadata(key: str) -> bool:
-    """A chave DESCREVE auth (flag/timestamp/URL/policy) em vez de carregar o segredo?"""
-    low = key.lower().replace("-", "_")
+    """A chave DESCREVE auth (flag/timestamp/URL/policy) ou e DESCRITOR de recurso
+    (name/type/uid/namespace/kind/ref) em vez de carregar o segredo?
+
+    Normaliza '.', '/' e '-' para '_' ANTES do endswith: chaves compostas por caminho
+    (`kubernetes.io/serviceaccount/secret.name`) ou por ponto terminam num descritor que o
+    endswith so enxerga com o separador unificado.
+    """
+    low = key.lower().replace("-", "_").replace(".", "_").replace("/", "_")
     return any(low.endswith(suf) for suf in _META_SUFIXOS) or any(
         low.startswith(pre) for pre in _META_PREFIXOS
     )

@@ -48,6 +48,7 @@ O Chaveiro cobre esses vetores dos dois lados: **audita** um token, **prova** a 
 | `header-jku` / `header-x5u` | Chave carregada de URL do token → **SSRF** / key injection | 🟠 Alta | A01 · CWE-918 |
 | `header-jwk` | Chave pública embutida (atacante fornece a própria) | 🟠 Alta | A07 · CWE-347 |
 | `header-kid-injection` | `kid` com `../`, `'`, `;` → path traversal / SQLi | 🟠 Alta | A05 · CWE-91 |
+| `header-duplicate-key` / `payload-duplicate-key` | Chave repetida no **cabeçalho ou no payload** — parsers divergem (primeiro × último vence): um verificador lê `role: user`/expirado e outro `role: admin`/válido do **mesmo** token | 🟠 Alta | A07 · CWE-347 |
 | `header-zip-jws` | `zip` (compressão) num JWS — viola o RFC, abre DoS por descompressão (caso Apache James) | 🟠 Alta | A06 · CWE-409 |
 | `claim-no-exp` / `claim-long-lifetime` | Token eterno / longevo demais | 🟠/🟡 | A07 · CWE-613 |
 | `claim-malformed-time` | `exp`/`nbf` presente mas não numérico → verificador falha aberto | 🟡 Média | A07 · CWE-613 |
@@ -76,7 +77,9 @@ python bench/avaliar.py     # mede recall + IC95% e falso-positivo
 
 O corpus **não é campo**: os tokens foram plantados por quem escreveu a ferramenta, então o número mede *cobertura dos vetores conhecidos*, não acurácia contra tráfego de produção. Ver `bench/README.md` para o que ele cobre e o que **não** cobre.
 
-**Falso-positivo conhecido (transparência, não vitrine):** o detector `payload-sensitive` casa `secret` como *substring* do nome da claim, de propósito, para pegar as formas compostas reais (`client_secret`, `db_secret`, `dbSecret`). O custo é que uma claim chamada `secretary` também é sinalizada. É um aviso de severidade **baixa**, nunca um bypass — mas prefiro documentar aqui a decidir por você que você não ia notar.
+**Calibração de baixo falso-positivo (como o `payload-sensitive` decide):** o gatilho por **nome da claim** casa por *token* do nome, não por substring solta — `client_secret`/`db_secret`/`dbSecret` disparam, mas `secretary`, `discard` e afins **não**. Uma chave-sensível que **termina em descritor de recurso** (`_name`/`_type`/`_uid`/`_namespace`/`_kind`/`_ref`, com `.`/`/`/`-` normalizados) descreve *metadado*, não o segredo — o token legado de ServiceAccount do Kubernetes carimba `kubernetes.io/serviceaccount/secret.name = admin-user-token-6gl6l` (o **nome** do objeto Secret, não a credencial), e por isso não é mais sinalizado. Independente da chave, o gatilho por **valor** continua valendo: uma assinatura forte de credencial (`AKIA…`, `ghp_…`, `sk-…`, PEM, webhook do Slack) dispara sob **qualquer** nome de claim — inclusive sob uma chave-descritor —, para nenhum segredo real escapar pela calibração.
+
+**`claim-long-lifetime` e refresh tokens:** um refresh token tem vida longa por design e não deve virar achado. O reconhecimento não depende do nome do campo: cobre as convenções das libs mainstream — `typ` (Keycloak), `type` (Flask-JWT-Extended) e `token_type` (djangorestframework-simplejwt) com valor `refresh`. O `typ` é *self-asserted*, então a supressão só vale quando **não** há sinais de access token (`scope`/`scp`/`azp`): um access token de 30 dias com `scope: admin` **não** ganha isenção só por se declarar `refresh`.
 
 ---
 
@@ -170,7 +173,10 @@ explícito, com aviso, porque quem grava o laudo é o operador desse dado.
 
 O envelope JSON traz ainda `commit`, `ruleset_hash` (sha256 do catálogo de
 checagens) e `artifact_sha256` (autoverificável), para o laudo ser vinculável ao
-código e às regras que o produziram.
+código e às regras que o produziram. O `commit` é o SHA da **própria ferramenta**
+(o Chaveiro audita um token, não varre um repositório), resolvido pelo git do
+**diretório do pacote** — nunca pelo diretório de onde você chamou o CLI, senão
+rodar `chaveiro` de dentro de outro repositório git carimbaria o HEAD daquele repo.
 
 > **Para recomputar o `artifact_sha256`:** o hash é sobre os **bytes UTF-8** do JSON
 > (o catálogo é PT-BR, com acentos). No Windows, `open(caminho)` lê em cp1252 e dá um
@@ -192,7 +198,7 @@ contexto pedir. (`chaveiro <comando> --help` lista tudo.)
 | `--no-defaults` | `crack` | desligado | testar **só** a sua wordlist, sem a lista embutida |
 | `--set chave=valor` | `forge`, `forge-confusion` | — | editar claims no PoC (repetível: `--set sub=admin --set role=admin`) |
 | `--alg` | `forge`, `forge-confusion` | `HS256` | forjar com outro HMAC (`HS384`/`HS512`) |
-| `CHAVEIRO_COMMIT` (env) | todos | `git rev-parse HEAD` | fixar o SHA de proveniência quando rodar de um pacote instalado (sem `.git`) |
+| `CHAVEIRO_COMMIT` (env) | todos | `git rev-parse HEAD` no diretório do pacote | fixar o SHA de proveniência quando rodar de um pacote instalado (sem `.git`) — só aceito se for um SHA de 40 hex (`^[0-9a-f]{40}$`); um valor malformado (`HEAD`, SHA truncado) é ignorado, não carimbado |
 
 ### O lado da correção — referência mínima segura
 
