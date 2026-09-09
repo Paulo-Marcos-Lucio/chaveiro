@@ -156,6 +156,16 @@ The JSON envelope also carries `commit`, `ruleset_hash` (sha256 of the checks ca
 
 > **To recompute `artifact_sha256`:** the hash is over the JSON's **UTF-8 bytes** (the catalog is in Portuguese, with accented characters). On Windows, `open(caminho)` reads as cp1252 and produces a false "tampered" result — read the file as UTF-8 before recomputing: `open(caminho, "rb").read().decode("utf-8")`.
 
+**Writing to a file (`-o`).** `inspect` and `batch` accept `-o/--output file.json`
+(requires `--format json`) to write the report straight to UTF-8 instead of printing
+it to stdout — the content is byte-identical to what the same command would print to
+stdout without `-o`. This avoids the trap of **PowerShell**'s `>` operator, which
+re-encodes the output line by line (cp1252 by default, slow, prone to mojibake with a
+Portuguese catalog) — `chaveiro inspect "$TOKEN" -f json -o report.json` never goes
+through the shell's redirection, so the file comes out identical on any terminal. It's
+also the direct way to feed a CI step (e.g. `github/codeql-action/upload-sarif`)
+without depending on how the runner redirects stdout.
+
 ### Configuration — the options that matter most
 
 None of this is mandatory: Chaveiro runs on the defaults. Change something only when the context calls for it. (`chaveiro <command> --help` lists everything.)
@@ -163,6 +173,7 @@ None of this is mandatory: Chaveiro runs on the defaults. Change something only 
 | Option | Where | Default | When to change |
 | --- | --- | --- | --- |
 | `-f, --format` | `inspect`, `batch` | `console` | `json` for consuming in a pipeline/dashboard (schema `suite-appsec/1`) |
+| `-o, --output` | `inspect`, `batch` | — | write the report to a UTF-8 file (requires `--format json`); avoids PowerShell's `>` re-encoding |
 | `--fail-on` | `inspect`, `batch` | `high` | lower it to `low`/`medium` for a strict gate; `none` to never fail the build on severity |
 | `--claims-completas` | `inspect`, `batch` | off | only when you need to see the PII in the clear — opt-in with a warning, you become the LGPD data operator for the report |
 | `--strict` | `batch` | off | when a malformed line **should** bring down the build (by default it's just log noise) |

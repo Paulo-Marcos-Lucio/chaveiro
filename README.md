@@ -183,6 +183,16 @@ rodar `chaveiro` de dentro de outro repositório git carimbaria o HEAD daquele r
 > "adulterado" falso — leia o arquivo como UTF-8 antes de recalcular:
 > `open(caminho, "rb").read().decode("utf-8")`.
 
+**Gravando em arquivo (`-o`).** `inspect` e `batch` aceitam `-o/--output arquivo.json`
+(exige `--format json`) para gravar o laudo direto em UTF-8 em vez de imprimir no
+stdout — o conteúdo é byte-idêntico ao que sairia no stdout do mesmo comando sem
+`-o`. Isso evita a armadilha do operador `>` do **PowerShell**, que recodifica a
+saída linha a linha (cp1252 por padrão, lento, sujeito a mojibake com o catálogo em
+PT-BR) — `chaveiro inspect "$TOKEN" -f json -o laudo.json` não passa pelo redirecionamento
+do shell, então o arquivo sai idêntico em qualquer terminal. É também a forma direta
+de alimentar um passo de CI (ex.: `github/codeql-action/upload-sarif`) sem depender de
+como o runner redireciona stdout.
+
 ### Configuração — as opções que mais importam
 
 Nada aqui é obrigatório: o Chaveiro roda com os defaults. Mude só quando o
@@ -191,6 +201,7 @@ contexto pedir. (`chaveiro <comando> --help` lista tudo.)
 | Opção | Onde | Default | Quando mudar |
 | --- | --- | --- | --- |
 | `-f, --format` | `inspect`, `batch` | `console` | `json` para consumir em pipeline/painel (schema `suite-appsec/1`) |
+| `-o, --output` | `inspect`, `batch` | — | gravar o laudo em arquivo UTF-8 (exige `--format json`); evita a recodificação do `>` do PowerShell |
 | `--fail-on` | `inspect`, `batch` | `high` | baixe para `low`/`medium` num gate rígido; `none` para nunca falhar o build por severidade |
 | `--claims-completas` | `inspect`, `batch` | desligado | só quando precisar ver a PII em claro — opt-in com aviso, você vira o operador LGPD do laudo |
 | `--strict` | `batch` | desligado | quando linha malformada **deve** derrubar o build (por padrão é só ruído de log) |
