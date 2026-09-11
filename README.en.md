@@ -162,7 +162,7 @@ None of this is mandatory: Chaveiro runs on the defaults. Change something only 
 
 | Option | Where | Default | When to change |
 | --- | --- | --- | --- |
-| `-f, --format` | `inspect`, `batch` | `console` | `json` for consuming in a pipeline/dashboard (schema `suite-appsec/1`) |
+| `-f, --format` | `inspect`, `batch` | `console` | `json` for consuming in a pipeline/dashboard (schema `suite-appsec/1`); `sarif` for the GitHub Code Scanning Security tab (SARIF 2.1.0) |
 | `--fail-on` | `inspect`, `batch` | `high` | lower it to `low`/`medium` for a strict gate; `none` to never fail the build on severity |
 | `--claims-completas` | `inspect`, `batch` | off | only when you need to see the PII in the clear — opt-in with a warning, you become the LGPD data operator for the report |
 | `--strict` | `batch` | off | when a malformed line **should** bring down the build (by default it's just log noise) |
@@ -218,7 +218,7 @@ It is a **minimal secure reference**, not a complete, production-ready verifier.
 
 ## 🏗️ Architecture
 
-Chaveiro answers one specific question: *would this token be accepted by a misconfigured verifier?* — and it answers before an attacker asks the same question. The data flows through a short pipeline: you pass in a token (or a file/log of tokens), it gets **decoded without verifying the signature**, the detectors scan the header, algorithm, claims, and payload, and each weakness becomes a `Finding` already classified by **OWASP 2025 / CWE**. In the end, out comes a report — on the **console** (rich) for reading, or as **JSON** (`schema suite-appsec/1`) for a pipeline. The audit is **100% passive**, it never touches the network; the attack commands (`crack`/`forge`) are separate and require authorization.
+Chaveiro answers one specific question: *would this token be accepted by a misconfigured verifier?* — and it answers before an attacker asks the same question. The data flows through a short pipeline: you pass in a token (or a file/log of tokens), it gets **decoded without verifying the signature**, the detectors scan the header, algorithm, claims, and payload, and each weakness becomes a `Finding` already classified by **OWASP 2025 / CWE**. In the end, out comes a report — on the **console** (rich) for reading, as **JSON** (`schema suite-appsec/1`) for a pipeline, or as **SARIF 2.1.0** for the GitHub Code Scanning Security tab. The audit is **100% passive**, it never touches the network; the attack commands (`crack`/`forge`) are separate and require authorization.
 
 ```mermaid
 flowchart TD
@@ -233,12 +233,12 @@ flowchart TD
     FND -.->|reference fix| REF["<b>reference/</b><br/>minimal secure validation"]
     subgraph OUT [" Output formats "]
         direction LR
-        CON["console (rich)"] ~~~ JS["JSON · suite-appsec/1"]
+        CON["console (rich)"] ~~~ JS["JSON · suite-appsec/1"] ~~~ SAR["SARIF 2.1.0"]
     end
     classDef nucleo fill:#0e2a24,stroke:#3fb79e,stroke-width:2px,color:#e7ede9;
     classDef saida fill:#241d0f,stroke:#d6a94e,color:#f5ecd9;
     class A,AUD,DEC,CHK,CAT,FND,RPT nucleo;
-    class CON,JS,ATK,REF saida;
+    class CON,JS,SAR,ATK,REF saida;
 ```
 
 ```
@@ -247,7 +247,7 @@ src/chaveiro/
 ├── checks/      # declarative catalog + detectors (alg, header, claims, payload)
 ├── attacks/     # crack (HMAC dictionary attack) and confusion (RS→HS PoC)
 ├── reference/   # minimal secure reference, documented — the fix side
-├── report/      # console (rich) and json
+├── report/      # console (rich), json and sarif (Code Scanning)
 ├── audit.py     # orchestration: audit a single token and in batch
 └── cli.py       # typer interface
 ```

@@ -6,6 +6,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from chaveiro import __version__
+from chaveiro.checks.catalog import CATALOG
 from chaveiro.cli import app
 from tests.conftest import hs_token, raw_token, sign_rs256
 
@@ -47,7 +48,28 @@ def test_inspect_output_grava_arquivo(tmp_path: Path) -> None:
 def test_output_com_console_e_erro_de_uso(tmp_path: Path) -> None:
     token = raw_token({"alg": "none"}, {"sub": "admin"})
     result = runner.invoke(app, ["inspect", token, "-o", str(tmp_path / "x.json")])
-    assert result.exit_code == 2  # --output exige --format json
+    assert result.exit_code == 2  # --output exige --format json ou sarif
+
+
+def test_inspect_format_sarif() -> None:
+    token = raw_token({"alg": "none"}, {"sub": "admin"})
+    result = runner.invoke(app, ["inspect", token, "-f", "sarif", "--now", str(NOW)])
+    assert result.exit_code == 1
+    doc = json.loads(result.stdout)
+    assert doc["version"] == "2.1.0"
+    run = doc["runs"][0]
+    assert len(run["tool"]["driver"]["rules"]) == len(CATALOG)
+    assert any(r["ruleId"] == "alg-none" for r in run["results"])
+
+
+def test_batch_format_sarif() -> None:
+    token = raw_token({"alg": "none"}, {"sub": "admin"})
+    result = runner.invoke(app, ["batch", "-", "-f", "sarif", "--now", str(NOW)], input=token)
+    assert result.exit_code == 1
+    doc = json.loads(result.stdout)
+    run = doc["runs"][0]
+    achado = next(r for r in run["results"] if r["ruleId"] == "alg-none")
+    assert achado["properties"]["tokenIndex"] == 1
 
 
 def test_crack_finds_weak_secret() -> None:
