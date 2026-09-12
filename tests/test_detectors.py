@@ -54,6 +54,12 @@ _CASOS_POSITIVOS: list[tuple[str, dict, dict]] = [
     # duplicate-key (header/payload) nao cabe num dict (nao ha como repetir chave); a parte.
     ("header-duplicate-key", {"alg": "HS256"}, {"sub": "a"}),
     ("payload-duplicate-key", {"alg": "HS256"}, {"sub": "a"}),
+    ("logout-token-malformed", {"alg": "HS256", "typ": "logout+jwt"}, {"sub": "a"}),
+    (
+        "cnf-multiple-binding",
+        {"alg": "HS256"},
+        {"sub": "a", "cnf": {"jkt": "abc123", "jwk": {"kty": "oct"}}},
+    ),
 ]
 
 
@@ -124,6 +130,10 @@ _CASOS_NEGATIVOS: list[tuple[str, dict, dict]] = [
     ("claim-long-lifetime", {"alg": "HS256"}, {"iat": NOW, "exp": NOW + 300}),
     # token sem 'zip' não dispara o achado de compressão em JWS.
     ("header-zip-jws", {"alg": "HS256"}, {"sub": "a"}),
+    # 'typ' comum (JWT) não é logout — não pode disparar logout-token-malformed.
+    ("logout-token-malformed", {"alg": "HS256", "typ": "JWT"}, {"sub": "a"}),
+    # cnf com um único método de amarração não é ambíguo.
+    ("cnf-multiple-binding", {"alg": "HS256"}, {"sub": "a", "cnf": {"jkt": "abc123"}}),
 ]
 
 
@@ -310,3 +320,84 @@ def test_well_formed_rs_token_is_clean() -> None:
         signature=b"\x01" * 64,
     )
     assert run_all(decode(token), NOW) == []
+
+
+# --------------------------------------------------------------------------- #
+# check_typ_and_binding: Logout Token (OIDC Back-Channel Logout 1.0) e 'cnf'
+# multi-amarração. Cobertura além do caso positivo/negativo genérico acima —
+# as DUAS formas de violação do logout token, e as duas formas alternativas
+# de declarar o 'typ' (header vs. claim), como já existe para 'refresh'.
+# --------------------------------------------------------------------------- #
+
+
+def test_logout_token_com_events_e_sem_nonce_esta_limpo() -> None:
+    # Positivo do critério: um Logout Token BEM formado (tem 'events', não tem
+    # 'nonce') não pode disparar o achado — só a forma errada dispara.
+    token = raw_token(
+        {"alg": "HS256", "typ": "logout+jwt"},
+        {"sub": "a", "events": {"http://schemas.openid.net/event/backchannel-logout": {}}},
+    )
+    assert "logout-token-malformed" not in _ids(token)
+
+
+def test_logout_token_com_nonce_dispara_mesmo_com_events() -> None:
+    # 'nonce' é proibido no Logout Token mesmo quando 'events' está presente —
+    # as duas condições do critério são independentes (OU, não E).
+    token = raw_token(
+        {"alg": "HS256", "typ": "logout+jwt"},
+        {
+            "sub": "a",
+            "events": {"http://schemas.openid.net/event/backchannel-logout": {}},
+            "nonce": "abc",
+        },
+    )
+    ids = _ids(token)
+    assert "logout-token-malformed" in ids
+    achado = next(f for f in run_all(decode(token), NOW) if f.check_id == "logout-token-malformed")
+    assert achado.severity is Severity.HIGH
+
+
+def test_logout_declarado_via_claim_type_tambem_e_reconhecido() -> None:
+    # Mesma leniência já usada para o refresh token: o nome do campo varia por
+    # biblioteca (header 'typ' ou claim 'type'/'token_type').
+    token = raw_token({"alg": "HS256"}, {"sub": "a", "type": "logout"})
+    assert "logout-token-malformed" in _ids(token)  # sem 'events' -> malformado
+
+
+def test_cnf_com_tres_metodos_ainda_e_um_so_achado_cnf_multiple_binding() -> None:
+    token = raw_token(
+        {"alg": "HS256"},
+        {"sub": "a", "cnf": {"jkt": "x", "jwk": {"kty": "oct"}, "jwe": "y"}},
+    )
+    ids = [f.check_id for f in run_all(decode(token), NOW) if f.check_id == "cnf-multiple-binding"]
+    assert ids == ["cnf-multiple-binding"]  # um achado só, não um por par
+
+
+def test_cnf_nao_dict_nao_quebra_nem_dispara_multiple_binding() -> None:
+    # 'cnf' malformado (não é objeto) não trava a auditoria nem é contado como
+    # "múltiplos métodos" — só não há como inspecionar seus membros.
+    token = raw_token({"alg": "HS256"}, {"sub": "a", "cnf": "nao-e-um-objeto"})
+    assert "cnf-multiple-binding" not in _ids(token)
+
+
+def test_typ_and_binding_no_jwt_aninhado_olha_so_o_miolo() -> None:
+    # A casca de um JWT aninhado não tem 'events'/'cnf' próprios — são do miolo.
+    # Sem o guard de `nested`, a casca (typ comum, sem events) não dispararia aqui
+    # de qualquer forma; o teste documenta a decisão explícita de pular a casca.
+    inner_logout = hs_token(
+        {"events": {"http://schemas.openid.net/event/backchannel-logout": {}}, "nonce": "x"},
+        typ="logout+jwt",
+    )
+    # Monta a casca manualmente: payload da casca é o JWS compacto do miolo.
+    from chaveiro.core.jwt import b64url_encode
+
+    h = b64url_encode(b'{"alg":"HS256","typ":"JWT","cty":"JWT"}')
+    p = b64url_encode(inner_logout.encode("ascii"))
+    casca = f"{h}.{p}."
+    decoded = decode(casca)
+    assert decoded.nested is not None
+    from chaveiro.checks.detectors import check_typ_and_binding
+
+    assert check_typ_and_binding(decoded) == []
+    # o miolo, auditado separadamente, dispara normalmente.
+    assert "logout-token-malformed" in _ids(inner_logout)

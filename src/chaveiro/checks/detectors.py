@@ -153,6 +153,7 @@ def _run_camada(token: DecodedToken, now: int) -> list[Finding]:
     findings += check_nesting(token)
     findings += check_claims(token, now)
     findings += check_payload(token)
+    findings += check_typ_and_binding(token)
     return findings
 
 
@@ -519,6 +520,89 @@ def check_payload(token: DecodedToken) -> list[Finding]:
                     "payload-sensitive",
                     f"A claim {path!r} contém um CPF (dado pessoal — LGPD) no payload.",
                     evidence=f"{path}=<cpf>",
+                )
+            )
+    return out
+
+
+# 'typ' que autodeclara um PAPEL do token, na mesma convenção já usada por 'refresh'/'refresh+jwt'
+# (check_claims) e por 'dpop+jwt' (perfil DPoP, RFC 9449 §4.2). Aceita tanto o header 'typ'
+# quanto as claims 'typ'/'type'/'token_type' do payload — nomes que já variam por biblioteca
+# para o refresh token, e não há razão pra supor que o logout token seja mais uniforme.
+_TIPOS_LOGOUT = {"logout", "logout+jwt"}
+
+
+def _typ_declarado(token: DecodedToken) -> str:
+    header_typ = str(token.header.get("typ", "")).strip().lower()
+    if header_typ:
+        return header_typ
+    for key in ("typ", "type", "token_type"):
+        valor = str(token.payload.get(key, "")).strip().lower()
+        if valor:
+            return valor
+    return ""
+
+
+def check_typ_and_binding(token: DecodedToken) -> list[Finding]:
+    """Duas checagens sem relação entre si, além de morarem ambas em 'typ'/claims de binding.
+
+    (1) Logout Token malformado — OIDC Back-Channel Logout 1.0 exige a claim 'events' (o que
+    marca o JWT como um evento de logout) e PROÍBE 'nonce' (o que o distingue de um ID Token
+    reciclado). Um token que se autodeclara logout ('typ: logout+jwt') mas não segue a forma
+    é um vetor real: um verificador que só confere 'typ' aceita qualquer JWT como logout válido
+    — sem 'events' não dá pra saber que evento é esse, e com 'nonce' pode ser um ID Token
+    reaproveitado (o Back-Channel Logout 1.0 §2.4 exige rejeitar 'nonce' por isso mesmo).
+
+    (2) 'cnf' (RFC 7800, confirmation) amarrando o token a MAIS de um método de prova de posse
+    ao mesmo tempo (jkt/jwk/jwe) é ambíguo: um verificador que confere 'jkt' (DPoP) e outro que
+    confere 'jwk' podem aceitar provas de posse DIFERENTES para o MESMO token — a amarração
+    deixa de garantir o que devia.
+
+    NÃO checa 'cnf' ausente (o "claim-cnf-absent" do título do item C08 no backlog). Medido:
+    virar advisory incondicional ('sem cnf' em QUALQUER token) reprova o corpus rotulado de
+    zero-falso-positivo (`tests/test_bench.py::test_recall_total_nos_ataques_e_zero_falso_positivo`,
+    6/6 negativos passam a soar positivo) e o gate "token bem formado = zero achados"
+    (`test_well_formed_rs_token_is_clean`, `test_batch.py`) — a maioria esmagadora dos JWTs reais
+    nunca usa prova de posse (DPoP/mTLS é exceção, não regra), então marcar a ausência como achado
+    universal É o falso positivo, não a correção dele. Fazer isso direito exige saber se o PERFIL
+    em uso exige prova de posse — o sistema de perfil é `CH-11a` (ordem 149, `pendente`), que
+    ainda não existe. Registrado como fora do escopo deste item (ver LEDGER).
+    """
+    if token.nested is not None:
+        return []  # casca de JWT aninhado: claims (inclusive 'cnf'/'events') moram no miolo
+    out: list[Finding] = []
+    payload = token.payload
+
+    if _typ_declarado(token) in _TIPOS_LOGOUT:
+        sem_events = "events" not in payload
+        tem_nonce = "nonce" in payload
+        if sem_events or tem_nonce:
+            motivos = []
+            if sem_events:
+                motivos.append("sem a claim 'events' (obrigatória)")
+            if tem_nonce:
+                motivos.append("com a claim 'nonce' (proibida num Logout Token)")
+            out.append(
+                make_finding(
+                    "logout-token-malformed",
+                    "Token se autodeclara logout ('typ' de logout) mas não segue a forma do "
+                    "OIDC Back-Channel Logout 1.0: " + " e ".join(motivos) + ". Um verificador "
+                    "que só confere 'typ' aceita isto como logout válido de qualquer forma.",
+                    evidence=f"events={'events' in payload!r}, nonce={tem_nonce!r}",
+                )
+            )
+
+    cnf = payload.get("cnf")
+    if isinstance(cnf, dict):
+        metodos = sorted(m for m in ("jkt", "jwk", "jwe") if m in cnf)
+        if len(metodos) > 1:
+            out.append(
+                make_finding(
+                    "cnf-multiple-binding",
+                    f"'cnf' declara {len(metodos)} métodos de amarração ao mesmo tempo "
+                    f"({metodos!r}). Verificadores que conferem métodos diferentes podem "
+                    "aceitar provas de posse diferentes para o mesmo token.",
+                    evidence=f"cnf keys={sorted(cnf)!r}",
                 )
             )
     return out
