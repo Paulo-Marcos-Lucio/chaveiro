@@ -72,6 +72,28 @@ CATALOG: dict[str, CheckMeta] = {
             "CWE-347",
         ),
         CheckMeta(
+            "signature-ecdsa-invalid-point",
+            "Assinatura ECDSA com r ou s igual a zero",
+            Severity.CRITICAL,
+            "r=0 ou s=0 nunca ocorre numa assinatura ECDSA gerada corretamente (ANSI X9.62/FIPS "
+            "186-4 exigem 0 < r,s < n) — é a assinatura 'psíquica' (CVE-2022-21449): um "
+            "verificador que não rejeita r=0/s=0 aceita QUALQUER mensagem sob essa chave, sem "
+            "conhecer o segredo. Rejeite explicitamente r=0 ou s=0 antes de verificar.",
+            "A04:2025 Cryptographic Failures",
+            "CWE-347",
+        ),
+        CheckMeta(
+            "signature-hmac-length-mismatch",
+            "Assinatura HMAC com tamanho diferente do esperado para o algoritmo",
+            Severity.HIGH,
+            "HS256/HS384/HS512 produzem sempre 32/48/64 bytes — um comprimento diferente é "
+            "assinatura truncada ou malformada. Um verificador que trunca antes de comparar "
+            "(ou que aceita o tamanho recebido) fica vulnerável a colisão por truncamento. "
+            "Rejeite qualquer comprimento fora do fixo do algoritmo declarado.",
+            "A04:2025 Cryptographic Failures",
+            "CWE-347",
+        ),
+        CheckMeta(
             "claim-iat-future",
             "Emissao no futuro (claim 'iat' > agora)",
             Severity.MEDIUM,
