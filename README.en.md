@@ -16,7 +16,7 @@
 [![MIT License](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-license.svg)](LICENSE)
 [![Ruff lint](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-ruff.svg)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-mypy.svg)](https://mypy-lang.org/)
-[![191 tests passing](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-tests.svg)](#-engineering-quality--method)
+[![250 tests passing](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-tests.svg)](#-engineering-quality--method)
 [![95% coverage](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-coverage.svg)](#-engineering-quality--method)
 [![OWASP 2025 · A07/A04](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-owasp.svg)](https://owasp.org/Top10/2025/)
 
@@ -86,7 +86,7 @@ The corpus **is not the field**: the tokens were planted by whoever wrote the to
 
 ## 🚀 Quick start
 
-**Prerequisite:** Python **3.10+** (CI covers 3.10 / 3.11 / 3.12). Nothing else — no service, no API key, no network: the audit is local and passive.
+**Prerequisite:** Python **3.10+** (CI covers 3.10 / 3.11 / 3.12 / 3.13). Nothing else — no service, no API key, no network: the audit is local and passive.
 
 ```bash
 # 1. install directly from Git (not on PyPI — see the note in Installation)
@@ -192,20 +192,30 @@ It is a **minimal secure reference**, not a complete, production-ready verifier.
 
 ---
 
-## 🔓 Pro version (private) — the engine is the same, Pro is human work
+## 🔓 Pro version (private) — active confirmation + human work
 
-**To be clear: Pro is not a different engine.** The detector in this repository is the same one that runs in the service — there is no "souped-up engine" hidden behind a paywall, and no check that is born only in the paid version. What's public here is what does the work. The table separates what the **tool** does (you run it yourself) from what the **service** adds (human work on top of the same engine):
+The public version does **complete, honest passive detection for what it sets out to do**: it decodes the token, runs every header/algorithm/claims/payload check, redacts PII, and delivers the report with provenance — without touching the network. That's enough to **find** the weakness and show how to fix it, and nothing here was pruned to push the service.
+
+The **Pro** edition (private, offered as a service) adds **active-confirmation code that is not in this repository** — the step from "this token *would* be accepted by a lax verifier" to "this verifier *accepted* it":
+
+- **Differential bypass confirmation** — forges `alg:none`, RS→HS confusion and an empty-key `kid`, then OBSERVES, against your authorized endpoint, whether each one is accepted, with a negative control (invalid signature) that must be **rejected** — which separates a broken verifier from an endpoint that accepts anything.
+- **`jku`/`x5u` SSRF proven by canary** — confirms the verifier dereferences a URL that came from the token, never pointing at your internal infra (the canary is external, the operator's).
+- **Weak HMAC secret confirmed offline** — proves the secret is guessable by reproducing the token's own signature, without touching the network.
+- **FAPI / Open Finance Brazil profile** — the extra `id_token`/client-assertion/DPoP rules of the Brazilian regulated ecosystem.
+
+The differential is not "more generic rules": it's **auditable confirm-don't-exploit** (the engine PROVES the flaw and stops — it never uses the access to read, list or exfiltrate data), **low false-positive with a number** (`bench/`, 95% CI) and **BR/LGPD focus**. Every active step is **gated**: it only runs against a system you own or with explicit written authorization.
 
 | | Public tool — **you run it** | Pro · service — **I run it with you** |
 | --- | --- | --- |
-| **Detection engine** | The same — **22/22** vectors (corpus `bench/`, 95% CI [85%;100%]), **0** false positives on 6 legitimate tokens | The **same** engine, pointed at your real authentication flow |
-| **Scope** | The token you paste, or the file/log you have | Issuer **and** verifier of the entire system, plus the historical tokens in your logs |
-| **Exploitation PoC** | `crack` / `forge` / `forge-confusion` on your own bench | **Authorized** PoC, with a signed scope, run in your environment and documented |
-| **Fix** | Documented `reference/` module (minimal secure reference) — you adapt it to your code | Validation **implemented and tested in your stack**, delivered via PR |
-| **Weak HMAC secret** | The tool flags the risk | **Rotation carried out with a retest** — I confirm the new secret holds up |
+| **Passive detection** | Complete — **22/22** vectors (corpus `bench/`, 95% CI [85%;100%]), **0** false positives on 6 legitimate tokens | The same passive base, pointed at your real authentication flow |
+| **Active confirmation** | — the public audit is local and never touches the network | **Differential-acceptance engine**: proves, against the authorized endpoint, whether the bypass is accepted |
+| **`jku`/`x5u` SSRF** | Flags the vector in the report | **Confirmed by an external canary** — the fetch reaches the canary, or it doesn't |
+| **Weak HMAC secret** | `crack` on your own bench flags the risk | **Confirmed offline** + **rotation carried out with a retest** — I confirm the new secret holds up |
+| **FAPI / Open Finance BR** | — | Rule profile for the Brazilian regulated ecosystem |
+| **Fix** | Documented `reference/` module — you adapt it to your code | Validation **implemented and tested in your stack**, delivered via PR |
 | **Knowledge transfer** | README + open source code | **Mentoring**: your team understands the why behind each bypass, not just the patch |
 
-> The engine is the same on both sides. What you're hiring in Pro is **human time** — from someone who has built issuers and verifiers in Open Finance / FAPI — never a hidden technical feature. Every PoC is **gated**: it only runs against a system you own or with explicit written authorization.
+> What you hire in Pro is the **active-confirmation engine** and the **human time** of someone who has built issuers and verifiers in Open Finance / FAPI. The public tool keeps doing the passive audit on its own, in full — the line between the two is the network: nothing leaves your machine here. Every PoC is **gated**: it only runs against a system you own or with explicit written authorization.
 
 <div align="center">
 
@@ -256,7 +266,7 @@ src/chaveiro/
 
 ## 🔬 Engineering quality & method
 
-**Gates (measured now, not promised):** **191 tests** passing (including *property-based* tests with Hypothesis) · **95%** coverage (the gate is enforced at `--cov-fail-under=90`) · `mypy --strict` clean across **20 files** · `ruff` (lint + format) clean · CI on a **Python 3.10 / 3.11 / 3.12** matrix.
+**Gates (measured now, not promised):** **250 tests** passing (including *property-based* tests with Hypothesis) · **95%** coverage (the gate is enforced at `--cov-fail-under=90`) · `mypy --strict` clean across **20 files** · `ruff` (lint + format) clean · CI on a **Python 3.10 / 3.11 / 3.12 / 3.13** matrix.
 
 **A test that goes red if detection gets silently undone.** The suite doesn't just confirm the positive case — it guards against *silent inversion*. Each detector has a negative counterpart (`_CASOS_NEGATIVOS` in `tests/test_detectors.py`): swapping `nbf > agora` for `nbf < agora` would pass any test that only looks at the positive case, but it leaves the negative one red. And a meta-test (`test_toda_checagem_do_catalogo_tem_caso_positivo`) fails the build if a new check is born without a case exercising it — human discipline turned into an invariant.
 

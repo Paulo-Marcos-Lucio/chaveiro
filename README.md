@@ -15,7 +15,7 @@
 [![MIT License](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-license.svg)](LICENSE)
 [![Ruff lint](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-ruff.svg)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-mypy.svg)](https://mypy-lang.org/)
-[![241 tests passing](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-tests.svg)](#-qualidade-de-engenharia--método)
+[![250 tests passing](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-tests.svg)](#-qualidade-de-engenharia--método)
 [![95% coverage](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-coverage.svg)](#-qualidade-de-engenharia--método)
 [![OWASP 2025 · A07/A04](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-owasp.svg)](https://owasp.org/Top10/2025/)
 
@@ -317,7 +317,7 @@ src/chaveiro/
 
 ## 🔬 Qualidade de engenharia & método
 
-**Portões (medidos agora, não prometidos):** **241 testes** verdes (incluindo *property-based* com Hypothesis) · cobertura **95%** (o gate trava em `--cov-fail-under=90`) · `mypy --strict` limpo em **20 arquivos** · `ruff` (lint + format) limpo · CI em matriz **Python 3.10 / 3.11 / 3.12 / 3.13**. O número de testes não é digitado à mão: o portão `scripts/check_test_count.py` reprova o build se o badge divergir de `pytest --collect-only`.
+**Portões (medidos agora, não prometidos):** **250 testes** verdes (incluindo *property-based* com Hypothesis) · cobertura **95%** (o gate trava em `--cov-fail-under=90`) · `mypy --strict` limpo em **20 arquivos** · `ruff` (lint + format) limpo · CI em matriz **Python 3.10 / 3.11 / 3.12 / 3.13**. O número de testes não é digitado à mão: o portão `scripts/check_test_count.py` reprova o build se o badge divergir de `pytest --collect-only`.
 
 **Teste que fica vermelho se a detecção for desfeita.** A suíte não confirma só o caso positivo — guarda a *inversão silenciosa*. Cada detector tem um par negativo (`_CASOS_NEGATIVOS` em `tests/test_detectors.py`): trocar `nbf > agora` por `nbf < agora` passa em qualquer teste que só olhe o positivo, mas deixa o negativo vermelho. E um meta-teste (`test_toda_checagem_do_catalogo_tem_caso_positivo`) reprova o build se uma checagem nova nascer sem caso que a exercite — disciplina humana virou invariante.
 

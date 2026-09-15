@@ -22,14 +22,20 @@ from pathlib import Path
 
 _RAIZ = Path(__file__).resolve().parent.parent
 _README = _RAIZ / "README.md"
+_README_EN = _RAIZ / "README.en.md"
 _BADGE_SVG = _RAIZ / "assets" / "chip-tests.svg"
 
 # "240 tests collected in 0.47s" — a última linha do --collect-only -q.
 _COLETADOS = re.compile(r"(\d+)\s+tests?\s+collected")
-# Fontes declaradas no repo, cada uma com o rótulo para a mensagem de erro.
+# Fontes declaradas no repo, cada uma com o rótulo para a mensagem de erro. O EN
+# entra aqui de propósito: a auditoria cruzada 2026-09-12 achou o README.en.md
+# defasado (191 vs 241) porque só o PT era travado — agora os dois idiomas são
+# GERADOS, não digitados, e nenhum pode derivar do outro sem reprovar o build.
 _FONTES: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("README badge (alt-text)", re.compile(r"(\d+)\s+tests?\s+passing", re.IGNORECASE)),
-    ("README prosa dos Portões", re.compile(r"\*\*(\d+)\s+testes\*\*")),
+    ("README.md badge (alt-text)", re.compile(r"(\d+)\s+tests?\s+passing", re.IGNORECASE)),
+    ("README.md prosa dos Portões", re.compile(r"\*\*(\d+)\s+testes\*\*")),
+    ("README.en.md badge (alt-text)", re.compile(r"(\d+)\s+tests?\s+passing", re.IGNORECASE)),
+    ("README.en.md prosa dos Gates", re.compile(r"\*\*(\d+)\s+tests\*\*")),
     ("assets/chip-tests.svg", re.compile(r"(\d+)\s+TESTS\s+PASSING", re.IGNORECASE)),
 )
 
@@ -55,14 +61,17 @@ def _coletar() -> int:
 
 def _declarados() -> list[tuple[str, int]]:
     """Extrai cada contagem declarada nas fontes versionadas do repo."""
-    if not _README.exists() or not _BADGE_SVG.exists():
-        sys.stderr.write("README.md ou assets/chip-tests.svg ausente.\n")
+    if not _README.exists() or not _README_EN.exists() or not _BADGE_SVG.exists():
+        sys.stderr.write("README.md, README.en.md ou assets/chip-tests.svg ausente.\n")
         raise SystemExit(2)
     readme = _README.read_text(encoding="utf-8")
+    readme_en = _README_EN.read_text(encoding="utf-8")
     svg = _BADGE_SVG.read_text(encoding="utf-8")
     textos = {
-        "README badge (alt-text)": readme,
-        "README prosa dos Portões": readme,
+        "README.md badge (alt-text)": readme,
+        "README.md prosa dos Portões": readme,
+        "README.en.md badge (alt-text)": readme_en,
+        "README.en.md prosa dos Gates": readme_en,
         "assets/chip-tests.svg": svg,
     }
     achados: list[tuple[str, int]] = []
