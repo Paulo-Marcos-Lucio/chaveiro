@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       # Actions fixadas por SHA de 40 hex (a própria Esteira reprova tag móvel);
       # o comentário registra a versão legível. Dependabot atualiza os SHAs.
@@ -44,6 +44,8 @@ jobs:
         run: ruff format --check .
       - name: Mypy (strict)
         run: mypy src
+      - name: Contagem de testes é gerada, não digitada
+        run: python scripts/check_test_count.py
       - name: Pytest
         run: pytest
 

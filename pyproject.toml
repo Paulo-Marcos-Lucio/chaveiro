@@ -9,7 +9,7 @@ description = "Auditor de segurança de tokens JWT/JWS — alg:none, confusão d
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Paulo Marcos Lucio" }]
+authors = [{ name = "Paulo Marcos Lucio", email = "contatopml26@gmail.com" }]
 keywords = ["security", "jwt", "jws", "jose", "appsec", "oauth", "fapi", "owasp"]
 classifiers = [
   "Development Status :: 4 - Beta",

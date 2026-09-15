@@ -19,8 +19,11 @@ from typing import Any
 from chaveiro.checks.detectors import has_cpf
 
 # Marcador visível — deixa claro que houve redação e como reverter, em vez de
-# apagar a claim (o que esconderia a própria existência do dado).
-REDIGIDO = "«redigido (LGPD) — use --claims-completas para ver»"
+# apagar a claim (o que esconderia a própria existência do dado). O delimitador
+# `<…>` é ASCII-puro (as guillemets «» viravam mojibake no console legado do
+# Windows/cp1252) e alinha com o marcador de omissão de segredo da própria suíte
+# (`<omitido: …>`): um único vocabulário de redação em todo laudo do Chaveiro.
+REDIGIDO = "<redigido (LGPD) — use --claims-completas para ver>"
 
 # Claims cujo NOME denuncia identidade do titular. Comparação em minúsculas.
 _IDENTITY_KEYS = frozenset(

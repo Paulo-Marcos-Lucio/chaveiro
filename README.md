@@ -15,7 +15,7 @@
 [![MIT License](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-license.svg)](LICENSE)
 [![Ruff lint](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-ruff.svg)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-mypy.svg)](https://mypy-lang.org/)
-[![191 tests passing](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-tests.svg)](#-qualidade-de-engenharia--método)
+[![241 tests passing](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-tests.svg)](#-qualidade-de-engenharia--método)
 [![95% coverage](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-coverage.svg)](#-qualidade-de-engenharia--método)
 [![OWASP 2025 · A07/A04](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-owasp.svg)](https://owasp.org/Top10/2025/)
 
@@ -85,7 +85,7 @@ O corpus **não é campo**: os tokens foram plantados por quem escreveu a ferram
 
 ## 🚀 Início rápido
 
-**Pré-requisito:** Python **3.10+** (o CI cobre 3.10 / 3.11 / 3.12). Nada além
+**Pré-requisito:** Python **3.10+** (o CI cobre 3.10 / 3.11 / 3.12 / 3.13). Nada além
 disso — sem serviço, sem chave de API, sem rede: a auditoria é local e passiva.
 
 ```bash
@@ -171,12 +171,25 @@ claims estruturais que a auditoria precisa (`exp`, `iat`, `nbf`, `iss`, `aud`,
 `jti`, `typ`, `kid`). Use `--claims-completas` para ver tudo em claro — é opt-in
 explícito, com aviso, porque quem grava o laudo é o operador desse dado.
 
-O envelope JSON traz ainda `commit`, `ruleset_hash` (sha256 do catálogo de
-checagens) e `artifact_sha256` (autoverificável), para o laudo ser vinculável ao
-código e às regras que o produziram. O `commit` é o SHA da **própria ferramenta**
-(o Chaveiro audita um token, não varre um repositório), resolvido pelo git do
-**diretório do pacote** — nunca pelo diretório de onde você chamou o CLI, senão
-rodar `chaveiro` de dentro de outro repositório git carimbaria o HEAD daquele repo.
+O envelope JSON traz ainda `commit`, `commit_scope`, `ruleset_hash` e
+`artifact_sha256` (autoverificável), para o laudo ser vinculável ao código e às
+regras que o produziram. O `commit` é o SHA da **própria ferramenta** (o Chaveiro
+audita um token, não varre um repositório), e `commit_scope: "tool"` diz isso sem
+ambiguidade — o mesmo campo `commit`, num scanner de repositório da suíte, viria com
+`"target"`. O SHA é resolvido pelo git do **diretório do pacote** — nunca pelo
+diretório de onde você chamou o CLI, senão rodar `chaveiro` de dentro de outro
+repositório git carimbaria o HEAD daquele repo. O `ruleset_hash` vem no formato
+auto-descritivo `sha256:<hex>` (o prefixo diz qual algoritmo recomputar) e cobre o
+catálogo de checagens **mais** a versão do schema do catálogo (`chaveiro-ruleset/1`):
+é a mesma receita de verificação que o cliente aplica às quatro ferramentas da suíte.
+
+> **Sem SARIF, por enquanto — e de propósito.** As demais ferramentas da suíte
+> (Sentinela, Guardião, Esteira) emitem SARIF porque cada achado tem **arquivo + linha**
+> para ancorar no GitHub Code Scanning. O Chaveiro audita um **token**, não uma árvore
+> de arquivos: o `Finding` não carrega origem de arquivo/linha, então um SARIF aqui teria
+> `region` vazia — anotação que não aterrissa em lugar nenhum do diff. Enquanto o token
+> não chegar com a origem (o arquivo/linha do log de onde foi colhido), a saída fica em
+> **console** e **JSON** (`schema suite-appsec/1`), ambos já com a proveniência acima.
 
 > **Para recomputar o `artifact_sha256`:** o hash é sobre os **bytes UTF-8** do JSON
 > (o catálogo é PT-BR, com acentos). No Windows, `open(caminho)` lê em cp1252 e dá um
@@ -229,25 +242,36 @@ entrego ao cliente junto do diagnóstico, não um drop-in.
 
 ---
 
-## 🔓 Versão Pro (privada) — o motor é o mesmo, o Pro é trabalho humano
+## 🔓 Versão Pro (privada) — confirmação ativa + trabalho humano
 
-**Para não haver dúvida: o Pro não é um motor diferente.** O detector deste repositório é o mesmo que roda no serviço — não existe "engine turbinada" escondida atrás de paywall, nem checagem que só nasce na versão paga. O que está público aqui é o que faz o trabalho. A tabela separa o que a **ferramenta** faz (você roda sozinho) do que o **serviço** acrescenta (trabalho humano sobre a mesma engine):
+A versão pública faz **detecção passiva completa e honesta para o que se propõe**: decodifica o token, roda todas as checagens de cabeçalho/algoritmo/claims/payload, redige a PII e entrega o laudo com proveniência — sem tocar a rede. É o bastante para **achar** a fraqueza e mostrar como corrigi-la, e nada aqui foi podado para empurrar o serviço.
+
+A edição **Pro** (privada, oferecida como serviço) acrescenta **código de confirmação ativa que não está neste repositório** — o passo que sai de "este token *seria* aceito por um verificador frouxo" para "este verificador *aceitou*":
+
+- **Confirmação diferencial de bypass** — forja `alg:none`, confusão RS→HS e `kid` de chave vazia e OBSERVA, contra o seu endpoint autorizado, se cada um é aceito, com um controle negativo (assinatura inválida) que precisa ser **rejeitado** — o que separa um verificador quebrado de um endpoint que aceita qualquer coisa.
+- **SSRF por `jku`/`x5u` provado por canário** — confirma que o verificador dereferencia uma URL vinda do token, sem nunca apontar para a sua infra interna (o canário é externo, do operador).
+- **Segredo HMAC fraco confirmado offline** — prova que o segredo é adivinhável reproduzindo a assinatura do próprio token, sem tocar a rede.
+- **Perfil FAPI / Open Finance Brasil** — as regras extras de `id_token`/client assertion/DPoP do ecossistema regulado brasileiro.
+
+O diferencial não é "mais regras genéricas": é **confirma-não-explora auditável** (o motor PROVA a falha e para — nunca usa o acesso para ler, listar ou exfiltrar dado), **baixo falso-positivo com número** (`bench/`, IC95%) e **recorte BR/LGPD**. Todo passo ativo é **gated**: só roda em sistema seu ou com autorização explícita por escrito.
 
 | | Ferramenta pública — **você roda** | Pro · serviço — **eu conduzo com você** |
 | --- | --- | --- |
-| **Motor de detecção** | O mesmo — **22/22** vetores (corpus `bench/`, IC95% [85%;100%]), **0** falso-positivo em 6 tokens legítimos | O **mesmo** motor, apontado para o seu fluxo real de autenticação |
-| **Escopo** | O token que você colar, ou o arquivo/log que você tiver | Emissor **e** verificador do sistema inteiro, mais o histórico de tokens em log |
-| **PoC de exploração** | `crack` / `forge` / `forge-confusion` na sua bancada | PoC **autorizado**, com escopo assinado, rodado no seu ambiente e documentado |
-| **Correção** | Módulo `reference/` (referência mínima segura) documentado — você adapta ao seu código | Validação **implementada e testada no seu stack**, entregue via PR |
-| **Segredo HMAC fraco** | A ferramenta aponta o risco | **Rotação conduzida com reteste** — confirmo que o novo segredo resiste |
+| **Detecção passiva** | Completa — **22/22** vetores (corpus `bench/`, IC95% [85%;100%]), **0** falso-positivo em 6 tokens legítimos | A mesma base passiva, apontada para o seu fluxo real de autenticação |
+| **Confirmação ativa** | — a auditoria pública é local e não toca a rede | **Motor de aceitação diferencial**: prova, contra o endpoint autorizado, se o bypass é aceito |
+| **SSRF `jku`/`x5u`** | Sinaliza o vetor no laudo | **Confirmado por canário externo** — o fetch chega ao canário, ou não chega |
+| **Segredo HMAC fraco** | `crack` na sua bancada aponta o risco | **Confirmado offline** + **rotação conduzida com reteste** — confirmo que o novo segredo resiste |
+| **FAPI / Open Finance BR** | — | Perfil de regras do ecossistema regulado brasileiro |
+| **Correção** | Módulo `reference/` documentado — você adapta ao seu código | Validação **implementada e testada no seu stack**, entregue via PR |
 | **Transferência** | README + código-fonte aberto | **Mentoria**: seu time entende o porquê de cada bypass, não só o patch |
 
-> A engine é a mesma dos dois lados. O que você contrata no Pro é **tempo humano** — de quem construiu emissor e verificador em Open Finance / FAPI — nunca um recurso técnico escondido. Todo PoC é **gated**: só roda em sistema seu ou com autorização explícita por escrito.
+> O que você contrata no Pro é o **motor de confirmação ativa** e o **tempo humano** de quem construiu emissor e verificador em Open Finance / FAPI. A ferramenta pública continua fazendo, sozinha e por completo, a auditoria passiva — a linha entre as duas é a rede: aqui nada sai da sua máquina.
 
 <div align="center">
 
 [![Pacotes e valores](https://img.shields.io/badge/Pacotes_e_valores-paulo--marcos--lucio.github.io-0f766e?style=for-the-badge)](https://paulo-marcos-lucio.github.io)
 [![Falar no LinkedIn](https://img.shields.io/badge/LinkedIn-Falar_agora-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/paulo-marcos-a07379174/)
+[![E-mail](https://img.shields.io/badge/E--mail-contatopml26%40gmail.com-0f766e?style=for-the-badge&logo=gmail&logoColor=white)](mailto:contatopml26@gmail.com)
 
 </div>
 
@@ -293,7 +317,7 @@ src/chaveiro/
 
 ## 🔬 Qualidade de engenharia & método
 
-**Portões (medidos agora, não prometidos):** **191 testes** verdes (incluindo *property-based* com Hypothesis) · cobertura **95%** (o gate trava em `--cov-fail-under=90`) · `mypy --strict` limpo em **20 arquivos** · `ruff` (lint + format) limpo · CI em matriz **Python 3.10 / 3.11 / 3.12**.
+**Portões (medidos agora, não prometidos):** **241 testes** verdes (incluindo *property-based* com Hypothesis) · cobertura **95%** (o gate trava em `--cov-fail-under=90`) · `mypy --strict` limpo em **20 arquivos** · `ruff` (lint + format) limpo · CI em matriz **Python 3.10 / 3.11 / 3.12 / 3.13**. O número de testes não é digitado à mão: o portão `scripts/check_test_count.py` reprova o build se o badge divergir de `pytest --collect-only`.
 
 **Teste que fica vermelho se a detecção for desfeita.** A suíte não confirma só o caso positivo — guarda a *inversão silenciosa*. Cada detector tem um par negativo (`_CASOS_NEGATIVOS` em `tests/test_detectors.py`): trocar `nbf > agora` por `nbf < agora` passa em qualquer teste que só olhe o positivo, mas deixa o negativo vermelho. E um meta-teste (`test_toda_checagem_do_catalogo_tem_caso_positivo`) reprova o build se uma checagem nova nascer sem caso que a exercite — disciplina humana virou invariante.
 

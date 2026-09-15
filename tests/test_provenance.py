@@ -24,6 +24,8 @@ from tests.conftest import raw_token
 
 NOW = 1_800_000_000
 _HEX64 = re.compile(r"[0-9a-f]{64}")
+# Formato auto-descritivo do ruleset_hash na suíte: prefixo de algoritmo + hex.
+_RULESET_HASH = re.compile(r"sha256:[0-9a-f]{64}")
 # SHA de 40 hex, válido para o gate `^[0-9a-f]{40}$` do CHAVEIRO_COMMIT.
 _SHA_VALIDO = "a1b2c3d4" * 5
 
@@ -39,8 +41,23 @@ def test_envelope_traz_commit_ruleset_hash_e_artifact_sha256(
     monkeypatch.setenv("CHAVEIRO_COMMIT", _SHA_VALIDO)
     doc = json.loads(to_json(_result()))
     assert doc["commit"] == _SHA_VALIDO
-    assert _HEX64.fullmatch(doc["ruleset_hash"])
+    # commit_scope discrimina o sentido de `commit`: no Chaveiro é sempre a FERRAMENTA.
+    assert doc["commit_scope"] == "tool"
+    assert _RULESET_HASH.fullmatch(doc["ruleset_hash"])
     assert _HEX64.fullmatch(doc["artifact_sha256"])
+
+
+def test_ruleset_hash_e_autodescritivo_e_versiona_o_schema() -> None:
+    """INVARIANTE (receita única de verificação da suíte): o ruleset_hash é
+    ``sha256:<64 hex>`` — prefixo de algoritmo explícito, não hex solto — e a versão
+    do schema do catálogo entra no blob hasheado, então o hash vira se a ESTRUTURA do
+    catálogo mudar, mesmo sem mudar uma regra. Revert→vermelho: devolver o hex puro
+    (sem prefixo) ou tirar o schema_version do blob quebra a asserção."""
+    from chaveiro.report.provenance import RULESET_SCHEMA, ruleset_hash
+
+    valor = ruleset_hash()
+    assert _RULESET_HASH.fullmatch(valor), valor
+    assert RULESET_SCHEMA == "chaveiro-ruleset/1"
 
 
 def test_commit_e_none_quando_nao_ha_fonte(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -85,7 +102,8 @@ def test_envelope_batch_tambem_traz_proveniencia(monkeypatch: pytest.MonkeyPatch
     outcomes = audit_batch(raw_token({"alg": "none"}, {"sub": "a"}) + "\n", NOW)
     doc = json.loads(batch_to_json(outcomes))
     assert doc["commit"] == _SHA_VALIDO
-    assert _HEX64.fullmatch(doc["ruleset_hash"])
+    assert doc["commit_scope"] == "tool"
+    assert _RULESET_HASH.fullmatch(doc["ruleset_hash"])
     assert _HEX64.fullmatch(doc["artifact_sha256"])
 
 

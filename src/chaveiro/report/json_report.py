@@ -29,6 +29,11 @@ def _provenance(document: dict[str, Any]) -> dict[str, Any]:
     o próprio campo, para ser autoverificável pelo cliente.
     """
     document["commit"] = provenance.commit()
+    # Discriminador do sentido de `commit` no envelope da suíte: o Chaveiro audita
+    # um TOKEN, não varre um repositório-alvo — o SHA carimbado é o da FERRAMENTA que
+    # rodou ("tool"), nunca o de um alvo ("target"). Torna o campo `commit` legível
+    # sem ambiguidade quando os laudos das 4 ferramentas chegam ao mesmo painel.
+    document["commit_scope"] = "tool"
     document["ruleset_hash"] = provenance.ruleset_hash()
     document["artifact_sha256"] = provenance.artifact_sha256(document)
     return document
