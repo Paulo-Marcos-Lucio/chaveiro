@@ -7,7 +7,8 @@ import os
 
 import pytest
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from cryptography.hazmat.primitives.serialization import (
     Encoding,
     NoEncryption,
@@ -74,6 +75,29 @@ def sign_ps256(payload: dict, private_pem: bytes) -> str:
         hashes.SHA256(),
     )
     return f"{h}.{p}.{b64url_encode(sig)}"
+
+
+@pytest.fixture(scope="session")
+def ec_keys() -> tuple[bytes, bytes]:
+    key = ec.generate_private_key(ec.SECP256R1())
+    private_pem = key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
+    public_pem = key.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+    return private_pem, public_pem
+
+
+def sign_es256(payload: dict, private_pem: bytes) -> str:
+    """Assina um JWS ES256 — R||S cru (RFC 7518 §3.4, IEEE P1363), não o DER do X9.62 que
+    `key.sign` devolve."""
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+    key = load_pem_private_key(private_pem, password=None)
+    assert isinstance(key, ec.EllipticCurvePrivateKey)
+    h, p, signing_input = _signing_input({"alg": "ES256", "typ": "JWT"}, payload)
+    der = key.sign(signing_input, ec.ECDSA(hashes.SHA256()))
+    r, s = decode_dss_signature(der)
+    n = (key.curve.key_size + 7) // 8
+    raw = r.to_bytes(n, "big") + s.to_bytes(n, "big")
+    return f"{h}.{p}.{b64url_encode(raw)}"
 
 
 @pytest.fixture(scope="session")
