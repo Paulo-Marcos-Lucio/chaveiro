@@ -92,22 +92,28 @@
  ],
  "negativos": [
   {
-   "vetor": "RS256 completo"
+   "vetor": "RS256 completo",
+   "emissor": "RS256"
   },
   {
-   "vetor": "PS256 completo"
+   "vetor": "RS256 com roles",
+   "emissor": "RS256"
   },
   {
-   "vetor": "EdDSA completo"
+   "vetor": "RS256 com nbf passado",
+   "emissor": "RS256"
   },
   {
-   "vetor": "RS256 com roles"
+   "vetor": "PS256 completo",
+   "emissor": "PS256"
   },
   {
-   "vetor": "RS256 com nbf passado"
+   "vetor": "EdDSA completo",
+   "emissor": "EdDSA"
   },
   {
-   "vetor": "ES256 completo"
+   "vetor": "ES256 completo",
+   "emissor": "ES256"
   }
  ]
 }
