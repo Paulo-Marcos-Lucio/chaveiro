@@ -316,6 +316,18 @@ def crack(
         )
         raise typer.Exit(1)
     err.print("[green]Nenhum candidato funcionou.[/] (Isso não prova que o segredo é forte.)")
+    # Handoff honesto: a lista embutida (~20 segredos) + a wordlist opcional do usuário
+    # é TRIAGEM, não um ataque de dicionário de verdade — dizer só "não achei" sem
+    # apontar o próximo passo deixa quem lê achando que o segredo foi validado como forte.
+    # hashcat -m 16500 é o modo JWT (HS256/384/512) dedicado, com GPU e regras de mutação;
+    # aceita o hash direto na linha de comando (sem precisar de um hashfile).
+    alvo_wordlist = str(wordlist) if wordlist is not None else "<wordlist-real, ex.: rockyou.txt>"
+    err.print(
+        "[dim]Isto foi só triagem — poucos segredos comuns"
+        + (" + a wordlist informada" if wordlist is not None else "")
+        + ", não um ataque de dicionário de verdade. Para isso, use o hashcat:[/]\n"
+        f"[dim]  hashcat -m 16500 -a 0 '{token}' {alvo_wordlist}[/]"
+    )
     raise typer.Exit(0)
 
 
