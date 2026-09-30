@@ -24,3 +24,13 @@ ruff check . && ruff format --check . && mypy src && pytest
 3. Add a positive test in `tests/test_detectors.py` **and** ensure that a well-formed token does not trigger the check.
 
 New attacks (`attacks/`) must come with a reproducible PoC in a test.
+
+## Definition of Done for bug fixes
+
+Fixing the example that showed up in the report and calling it resolved does
+not close the item: it needs a test that failed against the code before the
+fix, plus an invariant — property-based with Hypothesis when the class is a
+family of inputs — that keeps the whole class from coming back. Criterion and
+real examples in [Sentinela's
+`docs/definicao-de-pronto.md`](https://github.com/Paulo-Marcos-Lucio/sentinela/blob/main/docs/definicao-de-pronto.md)
+(Portuguese), which applies to all five tools in the suite, not just it.
