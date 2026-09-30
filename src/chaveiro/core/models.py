@@ -28,6 +28,42 @@ _RANK: dict[Severity, int] = {
 }
 
 
+class FindingType(str, Enum):
+    """Em qual DIMENSÃO do token a checagem vive — espelha o prefixo já usado nos
+    ids do catálogo (``alg-*``, ``claim-*``, ``header-*``, ``payload-*``), agora
+    como campo explícito em vez de convenção implícita no nome. Serve para quem
+    consome o JSON agrupar achados sem fazer parsing de string no `id`.
+    """
+
+    ALGORITHM = "algorithm"  # alg-none, alg-missing, alg-unknown, alg-hmac-advisory
+    CLAIM = "claim"  # exp/iat/aud/iss/nbf: presença, formato, tempo de vida
+    HEADER = "header"  # jku/x5u/jwk/x5c/kid/crit/zip/cty
+    PAYLOAD = "payload"  # conteúdo do corpo do token (aninhamento, dado sensível)
+
+
+class Confidence(str, Enum):
+    """Confiança de que o achado é um problema REAL neste token — não confiança de
+    parsing (a extração de header/claims é sempre determinística; o Chaveiro nunca
+    "acha que talvez" exista um campo). O que varia é se a checagem captura um fato
+    universalmente arriscado ou um sinal que depende do contexto de implantação:
+
+    - HIGH: o fato detectado é inequívoco e o risco vale para qualquer verificador
+      (``alg: none``, cabeçalho ``jku``/``jwk`` presente, claim temporal fora do
+      formato NumericDate do RFC 7519).
+    - MEDIUM: o fato é determinístico, mas o risco real depende de como o token é
+      usado (``aud``/``iss`` ausentes não importam num sistema de um serviço só;
+      ``x5c`` só é problema se o verificador não validar a cadeia).
+    - LOW: a checagem é consultiva por natureza — pede confirmação adicional antes
+      de virar ação (``alg-hmac-advisory`` pede rodar `chaveiro crack`;
+      `payload-nested-jwt` é heurística de "parece conter" outro token; `header-crit`
+      é puramente informativo).
+    """
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
 @dataclass(frozen=True)
 class DecodedToken:
     """Um JWS/JWT decodificado — **sem** verificação de assinatura."""
@@ -61,6 +97,13 @@ class Finding:
     severity: Severity
     detail: str
     recommendation: str
+    #: Dimensão do token (:class:`FindingType`) e confiança de que é um problema
+    #: real (:class:`Confidence`) — herdados de ``checks.catalog.CheckMeta``, que
+    #: exige os dois na construção (ver
+    #: `tests/test_detectors.py::test_toda_checagem_declara_type_e_confidence`).
+    #: Sem default: propagar um achado sem os dois quebra na construção.
+    finding_type: FindingType
+    confidence: Confidence
     cwe: str | None = None
     owasp: str | None = None
     evidence: str | None = None
