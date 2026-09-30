@@ -5,11 +5,14 @@ import json
 
 from rich.console import Console
 
+from chaveiro.audit import audit_batch
+from chaveiro.checks.catalog import CATALOG
 from chaveiro.checks.detectors import run_all
 from chaveiro.core.jwt import decode
 from chaveiro.core.models import AuditResult
 from chaveiro.report.console import render
 from chaveiro.report.json_report import to_json
+from chaveiro.report.sarif import batch_to_sarif, to_sarif
 from tests.conftest import raw_token
 
 NOW = 1_800_000_000
@@ -31,6 +34,73 @@ def test_json_structure() -> None:
     assert any(f["id"] == "alg-none" for f in doc["findings"])
     # by_severity sempre com as 5 chaves, mesmo as zeradas.
     assert set(doc["summary"]["by_severity"]) == {"critical", "high", "medium", "low", "info"}
+
+
+def test_sarif_structure() -> None:
+    doc = json.loads(to_sarif(_result()))
+    assert doc["version"] == "2.1.0"
+    run = doc["runs"][0]
+    assert run["tool"]["driver"]["name"] == "chaveiro"
+    # O catálogo INTEIRO vai para tool.driver.rules, inclusive as regras que não
+    # dispararam neste token — não só as que apareceram em `results`.
+    assert len(run["tool"]["driver"]["rules"]) == len(CATALOG)
+    declared = {r["id"] for r in run["tool"]["driver"]["rules"]}
+    assert declared == set(CATALOG)
+    assert run["results"]  # o token 'none' com claim ausente gera achados
+    for res in run["results"]:
+        assert res["ruleId"] in declared
+        # Sem arquivo/linha (o Chaveiro audita um token, não varre um repositório):
+        # a localização é lógica — a SEÇÃO do token de onde a checagem leu.
+        loc = res["locations"][0]["logicalLocations"][0]
+        assert loc["fullyQualifiedName"]
+        assert "physicalLocation" not in res["locations"][0]
+
+
+def test_sarif_fingerprint_e_estavel() -> None:
+    """O mesmo achado, produzido duas vezes a partir do mesmo token, tem que gerar o
+    MESMO fingerprint — é o que deixa o GitHub Code Scanning reconhecer o alerta entre
+    execuções em vez de abrir (e depois fechar por inatividade) um novo a cada rodada.
+    """
+    doc1 = json.loads(to_sarif(_result()))
+    doc2 = json.loads(to_sarif(_result()))
+    fps1 = [r["partialFingerprints"]["chaveiroFindingId/v1"] for r in doc1["runs"][0]["results"]]
+    fps2 = [r["partialFingerprints"]["chaveiroFindingId/v1"] for r in doc2["runs"][0]["results"]]
+    assert fps1 == fps2
+    assert fps1  # o token 'none' realmente gera achado — fingerprint de lista vazia não prova nada
+    assert len(fps1) == len(set(fps1))  # achados distintos não colidem entre si
+
+
+def test_sarif_batch_desambigua_por_token() -> None:
+    """Dois tokens idênticos no lote disparam o MESMO achado (mesmo check_id, mesma
+    evidência) — sem o índice do token no material do fingerprint, os dois resultados
+    colidiriam no mesmo `partialFingerprints` e um consumidor que deduplica por
+    fingerprint perderia um achado real do segundo token."""
+    token = raw_token({"alg": "none"}, {"sub": "admin"})
+    outcomes = audit_batch(f"{token}\n{token}\n", NOW)
+    doc = json.loads(batch_to_sarif(outcomes))
+    run = doc["runs"][0]
+    achados_none = [r for r in run["results"] if r["ruleId"] == "alg-none"]
+    assert len(achados_none) == 2
+    fps = [r["partialFingerprints"]["chaveiroFindingId/v1"] for r in achados_none]
+    assert fps[0] != fps[1]
+    indices = [r["properties"]["tokenIndex"] for r in achados_none]
+    assert sorted(indices) == [1, 2]
+    fqns = [r["locations"][0]["logicalLocations"][0]["fullyQualifiedName"] for r in achados_none]
+    assert fqns[0] != fqns[1]
+    assert all(fqn.startswith("token[") for fqn in fqns)
+
+
+def test_sarif_batch_ignora_candidato_malformado() -> None:
+    """Um candidato que não decodifica não vira `Finding` nenhum — não há checagem a
+    reportar sobre um token que não existe, então ele simplesmente não aparece em
+    `results` (e não derruba o lote inteiro, como o resto do `batch` já garante)."""
+    token = raw_token({"alg": "none"}, {"sub": "admin"})
+    outcomes = audit_batch(f"{token}\nnao-e-um-jwt\n", NOW)
+    assert outcomes[1].result is None  # a linha malformada não decodificou
+    doc = json.loads(batch_to_sarif(outcomes))
+    resultados = doc["runs"][0]["results"]
+    assert resultados  # o primeiro token ainda gera achado
+    assert all(r["properties"]["tokenIndex"] == 1 for r in resultados)
 
 
 def test_console_render_does_not_crash() -> None:
