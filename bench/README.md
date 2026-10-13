@@ -52,3 +52,14 @@ Quem alterar detecção **roda esta bateria antes e depois** e registra os dois
 números no CHANGELOG. Recall que sobe às custas de falso-positivo não é melhoria —
 é troca, e a troca precisa estar visível. O teste `tests/test_bench.py` trava o
 número: se um detector regredir, o CI cai aqui, não num README que ninguém executa.
+
+## `emissores.py` — o outro lado: tráfego legítimo de emissor real
+
+`gerar.py` mede vetor de ataque. `emissores.py` mede o oposto: 30 tokens com o
+**shape real** de 6 emissores (Keycloak, Auth0, Entra, Cognito, Google, Open
+Finance Brasil) — `realm_access` do Keycloak, `tid`/`oid` do Entra,
+`token_use` do Cognito, `acr: urn:brasil:openbanking:...` do Open Finance —
+para que o jargão normal de cada provedor não seja lido como achado. Todo
+dado de identidade é fabricado e leva o marcador `exemplo` (`tests/
+test_bench_emissores.py` trava isso como invariante, não como revisão visual).
+Reproduza com `python bench/emissores.py` (lista a contagem por emissor).
