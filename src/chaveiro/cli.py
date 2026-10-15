@@ -22,7 +22,7 @@ from chaveiro.attacks.crack import crack as crack_secret
 from chaveiro.attacks.crack import crack_with_defaults
 from chaveiro.audit import audit_batch, audit_token, summarize
 from chaveiro.checks.catalog import CATALOG, OWASP_EDITION
-from chaveiro.core.jwt import JWTError, decode, encode_hmac
+from chaveiro.core.jwt import JWTError, decode_any, encode_hmac
 from chaveiro.core.models import DecodedToken, Severity
 from chaveiro.report import console as console_report
 from chaveiro.report.json_report import batch_to_json, to_json
@@ -144,7 +144,7 @@ def _root(
 
 def _decode_or_die(token: str) -> DecodedToken:
     try:
-        return decode(token)
+        return decode_any(token)
     except JWTError as exc:
         err.print("[red]Token inválido:[/]", _txt(exc))
         raise typer.Exit(2) from exc
