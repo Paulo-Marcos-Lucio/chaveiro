@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from chaveiro.core.jwt import (
     JWTError,
@@ -8,6 +12,7 @@ from chaveiro.core.jwt import (
     b64url_encode,
     decode,
     encode_hmac,
+    parse_json_strict,
     verify_asymmetric,
     verify_hmac,
 )
@@ -118,6 +123,57 @@ def test_verify_asymmetric_eddsa_rejects_tampered(ed25519_keys: tuple[bytes, byt
     token = sign_eddsa({"sub": "x"}, private_pem)
     tampered = decode(token[:-4] + ("AAAA" if not token.endswith("AAAA") else "BBBB"))
     assert not verify_asymmetric(tampered, public_pem)
+
+
+def test_header_duplicate_alg_registers_without_breaking_decode() -> None:
+    # Critério de aceite (CH-10a): header com "alg" duplicado não derruba o
+    # decode; fica registrado em duplicate_keys para o auditor ver a
+    # ambiguidade (um verificador poderia ler o primeiro valor, outro o
+    # último — exatamente a classe de confusão de algoritmo).
+    header = b'{"alg":"none","alg":"HS256"}'
+    decoded = decode(_raw(header, b'{"sub":"a"}'))
+    assert decoded.duplicate_keys == ("alg",)
+    assert decoded.alg == "HS256"  # json.loads: o último valor vence
+
+
+def test_payload_duplicate_key_also_registers() -> None:
+    payload = b'{"sub":"a","sub":"b"}'
+    decoded = decode(_raw(b'{"alg":"HS256"}', payload))
+    assert decoded.duplicate_keys == ("sub",)
+    assert decoded.payload["sub"] == "b"
+
+
+def test_duplicate_keys_in_both_header_and_payload_combine() -> None:
+    header = b'{"alg":"HS256","alg":"none"}'
+    payload = b'{"sub":"a","sub":"b"}'
+    decoded = decode(_raw(header, payload))
+    assert set(decoded.duplicate_keys) == {"alg", "sub"}
+
+
+def test_no_duplicates_is_empty_tuple() -> None:
+    token = hs_token({"sub": "alice"}, secret="k")
+    assert decode(token).duplicate_keys == ()
+
+
+@given(
+    keys=st.lists(
+        st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=6),
+        min_size=2,
+        max_size=6,
+        unique=True,
+    )
+)
+def test_parse_json_strict_finds_every_repeated_key(keys: list[str]) -> None:
+    """INVARIANTE: toda chave repetida num objeto JSON é reportada por
+    ``parse_json_strict`` — não importa quantas outras chaves (únicas) estejam
+    ao redor, nem em que posição a repetição aparece. Esta é a invariante que
+    sustenta ``duplicate_keys``: se ela falhasse, o campo poderia ficar vazio
+    bem na hora em que o token é ambíguo."""
+    base = json.dumps({k: i for i, k in enumerate(keys)})
+    repeated = keys[0]
+    raw = base[:-1].encode() + f',"{repeated}":"zzz"}}'.encode()
+    _value, duplicates = parse_json_strict(raw, "teste")
+    assert duplicates == [repeated]
 
 
 def test_verify_asymmetric_alg_key_mismatch_is_false(ed25519_keys: tuple[bytes, bytes]) -> None:
