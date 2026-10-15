@@ -114,10 +114,11 @@ def decode(token: str) -> DecodedToken:
     if len(parts) != 3:
         raise JWTError(f"esperados 3 segmentos separados por ponto, encontrei {len(parts)}")
     header_b64, payload_b64, sig_b64 = parts
-    header = _decode_json(header_b64, "header")
-    payload, nested = _decode_payload(payload_b64)
+    header, header_dups = _decode_json(header_b64, "header")
+    payload, nested, payload_dups = _decode_payload(payload_b64)
     signature = b64url_decode(sig_b64)
     signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
+    duplicate_keys = tuple(dict.fromkeys([*header_dups, *payload_dups]))
     return DecodedToken(
         raw=token,
         header=header,
@@ -125,24 +126,46 @@ def decode(token: str) -> DecodedToken:
         signature=signature,
         signing_input=signing_input,
         nested=nested,
+        duplicate_keys=duplicate_keys,
     )
 
 
 def parse_json_limited(raw: bytes, what: str) -> Any:
-    """``json.loads`` com teto **explícito** de aninhamento.
+    """``json.loads`` com teto **explícito** de aninhamento. Atalho de
+    :func:`parse_json_strict` para quem não precisa saber de chave duplicada
+    (ex.: a heurística de ``looks_like_jws``)."""
+    value, _duplicates = parse_json_strict(raw, what)
+    return value
 
-    ``json.loads`` é recursivo: um documento profundo o bastante derruba o
-    processo com ``RecursionError``, e ``json.dumps`` (usado pelos relatórios)
-    estoura antes ainda. Por isso a profundidade é medida **antes** do parse,
-    varrendo os bytes uma vez, sem recursão — assim decodificação, render e
-    serialização ficam protegidos de uma vez só. Tudo o que é entrada hostil
-    vira ``JWTError``, que o chamador já sabe tratar.
+
+def parse_json_strict(raw: bytes, what: str) -> tuple[Any, list[str]]:
+    """``json.loads`` com teto de aninhamento **e** detecção de chave duplicada.
+
+    RFC 8259 não proíbe objeto JSON com chave repetida — só diz que o
+    comportamento "não é definido". Parsers discordam sobre qual delas vence
+    (``json.loads`` fica com a última); um verificador que decidisse pela
+    primeira leria um ``alg`` diferente do que o auditor reportaria sem isso.
+    Em vez de recusar o token (um verificador tolerante aceitaria do mesmo
+    jeito, e recusar escondia o problema em vez de expor), o parse segue
+    ``object_pairs_hook`` coletando toda chave repetida — em qualquer nível de
+    objeto — e devolve junto com o valor já decodificado.
     """
     depth = _nesting_depth(raw)
     if depth > MAX_JSON_DEPTH:
         raise JWTError(f"{what} aninhado demais: {depth} níveis (teto {MAX_JSON_DEPTH})")
+
+    duplicates: list[str] = []
+
+    def _object_pairs_hook(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        seen: set[str] = set()
+        for key, _value in pairs:
+            if key in seen and key not in duplicates:
+                duplicates.append(key)
+            seen.add(key)
+        return dict(pairs)
+
     try:
-        return json.loads(raw)
+        value = json.loads(raw, object_pairs_hook=_object_pairs_hook)
     except (ValueError, RecursionError) as exc:
         # `json.loads` levanta `ValueError` para JSON malformado (JSONDecodeError),
         # bytes não-UTF-8 (UnicodeDecodeError também é ValueError) **e** — o caso
@@ -155,6 +178,7 @@ def parse_json_limited(raw: bytes, what: str) -> Any:
         raise JWTError(
             f"{what} não é JSON processável (UTF-8 válido, sem inteiro grande demais)"
         ) from exc
+    return value, duplicates
 
 
 def _nesting_depth(raw: bytes) -> int:
@@ -199,26 +223,26 @@ def looks_like_jws(value: str) -> bool:
     return isinstance(header, dict) and "alg" in header
 
 
-def _decode_json(segment: str, what: str) -> dict[str, Any]:
-    data = parse_json_limited(b64url_decode(segment), what)
+def _decode_json(segment: str, what: str) -> tuple[dict[str, Any], list[str]]:
+    data, duplicates = parse_json_strict(b64url_decode(segment), what)
     if not isinstance(data, dict):
         raise JWTError(f"{what} deve ser um objeto JSON")
-    return data
+    return data, duplicates
 
 
-def _decode_payload(segment: str) -> tuple[dict[str, Any], str | None]:
+def _decode_payload(segment: str) -> tuple[dict[str, Any], str | None, list[str]]:
     """Payload de um JWT comum (objeto JSON) ou de um JWT aninhado (RFC 7519 §5.2)."""
     raw = b64url_decode(segment)
     try:
-        data = parse_json_limited(raw, "payload")
+        data, duplicates = parse_json_strict(raw, "payload")
     except JWTError:
         nested = _as_nested_jws(raw)
         if nested is None:
             raise
-        return {}, nested
+        return {}, nested, []
     if not isinstance(data, dict):
         raise JWTError("payload deve ser um objeto JSON (ou um JWS compacto, se aninhado)")
-    return data, None
+    return data, None, duplicates
 
 
 def _as_nested_jws(raw: bytes) -> str | None:
