@@ -22,8 +22,14 @@ from chaveiro.attacks.crack import crack as crack_secret
 from chaveiro.attacks.crack import crack_with_defaults
 from chaveiro.audit import audit_batch, audit_token, summarize
 from chaveiro.checks.catalog import CATALOG, OWASP_EDITION
+from chaveiro.checks.dpop import (
+    DEFAULT_IAT_WINDOW_S,
+    DPOP_CATALOG,
+    validate_dpop,
+    validate_dpop_binding,
+)
 from chaveiro.core.jwt import JWTError, decode, encode_hmac
-from chaveiro.core.models import DecodedToken, Severity
+from chaveiro.core.models import AuditResult, DecodedToken, Severity
 from chaveiro.report import console as console_report
 from chaveiro.report.json_report import batch_to_json, to_json
 
@@ -122,6 +128,29 @@ def _resolve_secret(secret: str, *, token_veio_do_stdin: bool) -> str:
     return secret
 
 
+def _resolve_access_token(access_token: str, *, proof_veio_do_stdin: bool) -> str:
+    """Resolve o access token do ``--access-token`` ou do stdin ('-'), avisando sobre o argv.
+
+    Mesma classe de P1-02 que :func:`_resolve_secret`: um access token no argv vaza no
+    histórico do shell e na lista de processos tanto quanto o JWT ou o segredo HMAC.
+    """
+    if access_token.strip() == "-":
+        if proof_veio_do_stdin:
+            err.print(
+                "[red]Prova e access token não podem vir ambos do stdin (só há um).[/] "
+                "Passe a prova por argumento e o access token por '--access-token -', "
+                "ou vice-versa."
+            )
+            raise typer.Exit(2)
+        data = sys.stdin.read().strip()
+        if not data:
+            err.print("[red]Nenhum access token recebido no stdin.[/]")
+            raise typer.Exit(2)
+        return data
+    err.print(f"[yellow]{_AVISO_ARGV}[/]")
+    return access_token
+
+
 def _txt(value: object) -> Text:
     """Dado externo vira `Text` — o rich não interpreta `[...]` dentro de `Text`."""
     return Text(str(value))
@@ -199,6 +228,45 @@ def inspect(
         _emit(to_json(result, redact=redact), output)
     else:
         console_report.render(result, redact=redact)
+    top = result.max_severity()
+    raise typer.Exit(1 if top is not None and top.rank >= fail_on.rank() else 0)
+
+
+@app.command()
+def dpop(
+    proof: str = typer.Argument(..., help="A prova DPoP a auditar; use '-' para ler do stdin."),
+    access_token: str | None = typer.Option(
+        None,
+        "--access-token",
+        help="Access token associado — ativa as checagens de binding ('ath'/'cnf.jkt'). "
+        "Use '-' para ler do stdin (se a prova não vier dele).",
+    ),
+    fmt: Format = typer.Option(Format.console, "--format", "-f", help="Formato de saída."),
+    output: Path | None = typer.Option(
+        None, "--output", "-o", help="Grava o laudo neste arquivo (exige --format json)."
+    ),
+    now: int | None = typer.Option(None, "--now", help="Epoch a usar como 'agora' (para testes)."),
+    iat_window: int = typer.Option(
+        DEFAULT_IAT_WINDOW_S, "--iat-window", help="Janela de frescor (segundos) para o 'iat'."
+    ),
+    fail_on: FailOn = typer.Option(FailOn.high, "--fail-on", help="Severidade que faz sair com 1."),
+) -> None:
+    """Audita uma prova DPoP (RFC 9449) — typ/alg/jwk/claims e, com --access-token, o binding."""
+    proof_veio_do_stdin = proof.strip() == "-"
+    proof = _resolve_token(proof)
+    if output is not None and fmt is not Format.json:
+        raise typer.BadParameter("--output exige --format json (o console é para o terminal).")
+    token = _decode_or_die(proof)
+    agora = now if now is not None else int(time.time())
+    findings = validate_dpop(token, agora, iat_window)
+    if access_token is not None:
+        access_token = _resolve_access_token(access_token, proof_veio_do_stdin=proof_veio_do_stdin)
+        findings += validate_dpop_binding(token, access_token)
+    result = AuditResult(token=token, findings=findings)
+    if fmt is Format.json:
+        _emit(to_json(result, redact=True), output)
+    else:
+        console_report.render(result, redact=True)
     top = result.max_severity()
     raise typer.Exit(1 if top is not None and top.rank >= fail_on.rank() else 0)
 
@@ -387,7 +455,7 @@ def regras() -> None:
     table.add_column("Severidade", no_wrap=True)
     table.add_column("Título")
     table.add_column(f"OWASP {OWASP_EDITION} / CWE", no_wrap=True)
-    for meta in CATALOG.values():
+    for meta in (*CATALOG.values(), *DPOP_CATALOG.values()):
         table.add_row(
             meta.id,
             meta.severity.value,

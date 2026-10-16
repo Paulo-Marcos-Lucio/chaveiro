@@ -98,3 +98,83 @@ def test_forge_with_secret() -> None:
     result = runner.invoke(app, ["forge", token, "--secret", "k", "--set", "role=admin"])
     assert result.exit_code == 0
     assert result.stdout.strip().count(".") == 2
+
+
+def test_rules_lists_dpop_checks() -> None:
+    result = runner.invoke(app, ["rules"])
+    assert result.exit_code == 0
+    assert "dpop-jwk-private" in result.stdout
+
+
+_DPOP_HEADER_OK = {
+    "typ": "dpop+jwt",
+    "alg": "ES256",
+    "jwk": {"kty": "EC", "crv": "P-256", "x": "eA", "y": "eQ"},
+}
+_DPOP_PAYLOAD_OK = {
+    "jti": "abc123",
+    "htm": "POST",
+    "htu": "https://api.example/token",
+    "iat": NOW,
+}
+
+
+def test_dpop_prova_valida_exit0() -> None:
+    proof = raw_token(_DPOP_HEADER_OK, _DPOP_PAYLOAD_OK)
+    result = runner.invoke(app, ["dpop", proof, "-f", "json", "--now", str(NOW)])
+    assert result.exit_code == 0
+    doc = json.loads(result.stdout)
+    assert doc["findings"] == []
+
+
+def test_dpop_jwk_privado_detectado_exit1() -> None:
+    header = {**_DPOP_HEADER_OK, "jwk": {**_DPOP_HEADER_OK["jwk"], "d": "segredo"}}
+    proof = raw_token(header, _DPOP_PAYLOAD_OK)
+    result = runner.invoke(app, ["dpop", proof, "-f", "json", "--now", str(NOW)])
+    assert result.exit_code == 1
+    doc = json.loads(result.stdout)
+    assert any(f["id"] == "dpop-jwk-private" for f in doc["findings"])
+
+
+def test_dpop_com_access_token_divergente_exit1() -> None:
+    from chaveiro.checks.dpop import compute_ath
+
+    payload = {**_DPOP_PAYLOAD_OK, "ath": compute_ath("outro-token")}
+    proof = raw_token(_DPOP_HEADER_OK, payload)
+    result = runner.invoke(
+        app,
+        ["dpop", proof, "--access-token", "este-token", "-f", "json", "--now", str(NOW)],
+    )
+    assert result.exit_code == 1
+    doc = json.loads(result.stdout)
+    assert any(f["id"] == "dpop-ath-mismatch" for f in doc["findings"])
+
+
+def test_dpop_access_token_via_stdin() -> None:
+    from chaveiro.checks.dpop import compute_ath, jwk_thumbprint
+
+    thumbprint = jwk_thumbprint(_DPOP_HEADER_OK["jwk"])
+    at = hs_token({"sub": "cliente", "cnf": {"jkt": thumbprint}}, secret="s")
+    proof = raw_token(_DPOP_HEADER_OK, {**_DPOP_PAYLOAD_OK, "ath": compute_ath(at)})
+    result = runner.invoke(
+        app,
+        ["dpop", proof, "--access-token", "-", "-f", "json", "--now", str(NOW)],
+        input=at,
+    )
+    assert result.exit_code == 0
+    doc = json.loads(result.stdout)
+    assert doc["findings"] == []
+
+
+def test_dpop_prova_e_access_token_nao_podem_vir_ambos_do_stdin() -> None:
+    proof = raw_token(_DPOP_HEADER_OK, _DPOP_PAYLOAD_OK)
+    result = runner.invoke(
+        app, ["dpop", "-", "--access-token", "-", "--now", str(NOW)], input=proof
+    )
+    assert result.exit_code == 2
+
+
+def test_dpop_access_token_stdin_vazio_exit2() -> None:
+    proof = raw_token(_DPOP_HEADER_OK, _DPOP_PAYLOAD_OK)
+    result = runner.invoke(app, ["dpop", proof, "--access-token", "-", "--now", str(NOW)], input="")
+    assert result.exit_code == 2

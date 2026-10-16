@@ -5,13 +5,22 @@ diferente de um access/id token: cabeçalho com ``typ: dpop+jwt``, ``alg``
 assimétrico e a chave PÚBLICA do par em ``jwk``; payload com ``jti``/``htm``/
 ``htu``/``iat``. As checagens de ``checks/detectors.py`` (pensadas para JWT
 comum) não cobrem essa semântica, daí um módulo dedicado.
+
+Além da prova isolada, ``validate_dpop_binding`` audita o par prova+access
+token: ``ath`` (RFC 9449 §4.2 — hash do access token) e ``cnf.jkt`` (RFC 9449
+§6.1 + RFC 7800 — thumbprint RFC 7638 da chave pública da prova, carimbado no
+próprio access token). Essas duas claims são o que amarra a prova a UM access
+token específico; sem elas, uma prova capturada serve para qualquer token.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from chaveiro.checks.catalog import CheckMeta
+from chaveiro.core.jwt import JWTError, b64url_encode, decode
 from chaveiro.core.models import DecodedToken, Finding, Severity
 
 # Catálogo próprio — não entra em ``checks.catalog.CATALOG`` de propósito: aquele
@@ -115,6 +124,70 @@ DPOP_CATALOG: dict[str, CheckMeta] = {
             "'iat' contra uma janela curta e configurável para limitar o réplay.",
             "A07:2025 Authentication Failures",
             "CWE-294",
+        ),
+        # --- Binding prova↔access token — checks/dpop.py::validate_dpop_binding --- #
+        CheckMeta(
+            "dpop-ath-missing",
+            "Prova DPoP sem 'ath' ao ser usada com um access token",
+            Severity.HIGH,
+            "'ath' amarra a prova a UM access token (RFC 9449 §4.2). Sem ela, a mesma prova "
+            "serve para apresentar qualquer access token que o cliente possua.",
+            "A07:2025 Authentication Failures",
+            "CWE-290",
+        ),
+        CheckMeta(
+            "dpop-ath-mismatch",
+            "'ath' da prova DPoP não corresponde ao access token apresentado",
+            Severity.CRITICAL,
+            "'ath' deve ser o SHA-256 (base64url) do access token efetivamente usado. Um valor "
+            "divergente é prova de reuso: esta prova foi gerada para outro access token.",
+            "A07:2025 Authentication Failures",
+            "CWE-290",
+        ),
+        CheckMeta(
+            "dpop-access-token-opaque",
+            "Access token não decodifica como JWT — binding 'cnf.jkt' não verificável",
+            Severity.INFO,
+            "Informativo: token de referência (opaco) é válido por desenho (RFC 9449 não exige "
+            "JWT), mas a verificação de 'cnf.jkt' por este auditor exige um access token JWT.",
+            None,
+            None,
+        ),
+        CheckMeta(
+            "dpop-cnf-missing",
+            "Access token (JWT) sem claim 'cnf' — binding por chave não verificável",
+            Severity.INFO,
+            "Informativo: sem 'cnf' não há como confirmar aqui que o access token está amarrado "
+            "à chave da prova. Pode ser intencional (binding resolvido no introspection).",
+            None,
+            None,
+        ),
+        CheckMeta(
+            "dpop-jkt-missing",
+            "Access token com 'cnf' mas sem 'jkt'",
+            Severity.MEDIUM,
+            "'cnf' sem 'jkt' (RFC 7800/RFC 9449 §6.1) não amarra o access token a nenhuma chave "
+            "— a confirmação de posse fica incompleta.",
+            "A07:2025 Authentication Failures",
+            "CWE-290",
+        ),
+        CheckMeta(
+            "dpop-jkt-unsupported-kty",
+            "Thumbprint RFC 7638 não calculável para o 'kty' do 'jwk' da prova",
+            Severity.LOW,
+            "Informativo/limitação: este auditor calcula o thumbprint para RSA/EC/OKP/oct "
+            "(RFC 7638 + extensão de fato para OKP/oct). Confirme o binding manualmente.",
+            None,
+            None,
+        ),
+        CheckMeta(
+            "dpop-jkt-mismatch",
+            "'cnf.jkt' do access token não corresponde à chave da prova DPoP",
+            Severity.CRITICAL,
+            "O thumbprint RFC 7638 do 'jwk' da prova diverge do 'cnf.jkt' do access token: este "
+            "access token não está amarrado à chave que assinou esta prova.",
+            "A07:2025 Authentication Failures",
+            "CWE-290",
         ),
     ]
 }
@@ -251,4 +324,105 @@ def validate_dpop(
     findings += _checar_claims_obrigatorias(token.payload)
     findings += _checar_htu(token.payload)
     findings += _checar_iat_janela(token.payload, now, iat_window_s)
+    return findings
+
+
+# --------------------------------------------------------------------------- #
+# Binding prova↔access token: 'ath' (RFC 9449 §4.2) e 'cnf.jkt' (RFC 9449
+# §6.1 + RFC 7800, thumbprint RFC 7638).
+# --------------------------------------------------------------------------- #
+
+# RFC 7638 §3.2: só os membros "obrigatórios" do JWK entram no thumbprint, em
+# ordem lexicográfica. OKP (RFC 8037) e 'oct' (simétrico) não têm thumbprint
+# formalizado em RFC — a extensão (crv+kty+x; k+kty) segue a mesma receita e é
+# prática comum (ex.: bibliotecas JOSE maduras), mas não é um RFC à parte.
+_THUMBPRINT_MEMBERS: dict[str, tuple[str, ...]] = {
+    "RSA": ("e", "kty", "n"),
+    "EC": ("crv", "kty", "x", "y"),
+    "OKP": ("crv", "kty", "x"),
+    "oct": ("k", "kty"),
+}
+
+
+def jwk_thumbprint(jwk: dict[str, Any]) -> str | None:
+    """Thumbprint RFC 7638 de um JWK — ``None`` se o 'kty' não é suportado ou os
+    membros obrigatórios não são todos strings (JWK malformado)."""
+    kty = jwk.get("kty")
+    members = _THUMBPRINT_MEMBERS.get(kty) if isinstance(kty, str) else None
+    if members is None or not all(isinstance(jwk.get(m), str) for m in members):
+        return None
+    canonical = json.dumps({m: jwk[m] for m in members}, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(canonical.encode("utf-8")).digest()
+    return b64url_encode(digest)
+
+
+def compute_ath(access_token: str) -> str:
+    """'ath' (RFC 9449 §4.2): SHA-256 base64url do access token, como STRING crua —
+    funciona tanto para access token JWT quanto opaco."""
+    digest = hashlib.sha256(access_token.encode("utf-8")).digest()
+    return b64url_encode(digest)
+
+
+def _checar_ath(payload: dict[str, Any], access_token: str) -> list[Finding]:
+    ath = payload.get("ath")
+    if ath is None:
+        return [_make_finding("dpop-ath-missing", "Claim 'ath' ausente no payload da prova.")]
+    esperado = compute_ath(access_token)
+    if ath == esperado:
+        return []
+    return [
+        _make_finding(
+            "dpop-ath-mismatch",
+            f"'ath'={ath!r} não corresponde ao SHA-256 do access token apresentado.",
+            evidence=f"ath={ath!r}, esperado={esperado!r}",
+        )
+    ]
+
+
+def _checar_jkt(jwk: Any, access_token: str) -> list[Finding]:
+    try:
+        at_decoded = decode(access_token)
+    except JWTError:
+        return [
+            _make_finding(
+                "dpop-access-token-opaque",
+                "Access token não decodifica como JWT — 'cnf.jkt' não verificável.",
+            )
+        ]
+    cnf = at_decoded.payload.get("cnf")
+    if not isinstance(cnf, dict):
+        return [
+            _make_finding("dpop-cnf-missing", "Access token (JWT) não tem claim 'cnf' no payload.")
+        ]
+    jkt = cnf.get("jkt")
+    if jkt is None:
+        return [_make_finding("dpop-jkt-missing", "'cnf' do access token não tem 'jkt'.")]
+    kty = jwk.get("kty") if isinstance(jwk, dict) else None
+    thumbprint = jwk_thumbprint(jwk) if isinstance(jwk, dict) else None
+    if thumbprint is None:
+        return [
+            _make_finding(
+                "dpop-jkt-unsupported-kty",
+                f"Não calculei o thumbprint do 'jwk' da prova (kty={kty!r}) para comparar "
+                "com 'cnf.jkt'.",
+            )
+        ]
+    if jkt == thumbprint:
+        return []
+    return [
+        _make_finding(
+            "dpop-jkt-mismatch",
+            f"'cnf.jkt'={jkt!r} do access token não bate com o thumbprint {thumbprint!r} "
+            "do 'jwk' da prova.",
+            evidence=f"jkt={jkt!r}, thumbprint={thumbprint!r}",
+        )
+    ]
+
+
+def validate_dpop_binding(token: DecodedToken, access_token: str) -> list[Finding]:
+    """Audita o binding de uma prova DPoP a UM access token: 'ath' (RFC 9449 §4.2)
+    e 'cnf.jkt' (RFC 9449 §6.1), quando o access token é um JWT."""
+    findings: list[Finding] = []
+    findings += _checar_ath(token.payload, access_token)
+    findings += _checar_jkt(token.header.get("jwk"), access_token)
     return findings
