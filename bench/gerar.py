@@ -199,51 +199,85 @@ def positivos() -> list[dict[str, str]]:
     ]
 
 
+_NEG_BASE = {"iat": BENCH_NOW, "exp": BENCH_NOW + 3600, "aud": "api", "iss": "https://auth"}
+
+
+def _negativos_rs256() -> list[dict[str, str]]:
+    """RS256: o emissor com mais variação de claims no corpus (3 vetores)."""
+    return [
+        {
+            "emissor": "RS256",
+            "vetor": "RS256 completo",
+            "token": _raw({"alg": "RS256", "typ": "JWT"}, {"sub": "u1", **_NEG_BASE}),
+        },
+        {
+            "emissor": "RS256",
+            "vetor": "RS256 com roles",
+            "token": _raw(
+                {"alg": "RS256", "typ": "JWT"},
+                {"sub": "u4", "roles": ["user"], "scope": "read", **_NEG_BASE},
+            ),
+        },
+        {
+            "emissor": "RS256",
+            "vetor": "RS256 com nbf passado",
+            "token": _raw(
+                {"alg": "RS256", "typ": "JWT"}, {"sub": "u5", "nbf": BENCH_NOW - 60, **_NEG_BASE}
+            ),
+        },
+    ]
+
+
+def _negativos_ps256() -> list[dict[str, str]]:
+    return [
+        {
+            "emissor": "PS256",
+            "vetor": "PS256 completo",
+            "token": _raw({"alg": "PS256", "typ": "JWT"}, {"sub": "u2", **_NEG_BASE}),
+        },
+    ]
+
+
+def _negativos_eddsa() -> list[dict[str, str]]:
+    return [
+        {
+            "emissor": "EdDSA",
+            "vetor": "EdDSA completo",
+            "token": _raw({"alg": "EdDSA", "typ": "JWT"}, {"sub": "u3", **_NEG_BASE}),
+        },
+    ]
+
+
+def _negativos_es256() -> list[dict[str, str]]:
+    return [
+        {
+            "emissor": "ES256",
+            "vetor": "ES256 completo",
+            "token": _raw({"alg": "ES256", "typ": "JWT"}, {"sub": "u6", **_NEG_BASE}),
+        },
+    ]
+
+
 def negativos() -> list[dict[str, str]]:
     """Tokens legítimos: RS*/PS*/EdDSA completos — devem passar SEM nenhum achado.
 
     Assimétricos de propósito: um HS* bem-formado ainda dispara o aviso
     'alg-hmac-advisory' (LOW), então não serve de negativo limpo.
+
+    Concatena um gerador por emissor (em vez de uma lista achatada) porque o
+    falso-positivo é medido *por emissor* (bench/avaliar.py): cada `_negativos_*`
+    é a unidade que soma no denominador de um emissor, e adicionar um vetor a um
+    emissor existente — ou um emissor novo — é acrescentar uma função, não achar
+    a posição certa numa lista de 6+ itens misturados.
     """
-    base = {"iat": BENCH_NOW, "exp": BENCH_NOW + 3600, "aud": "api", "iss": "https://auth"}
-    return [
-        {
-            "vetor": "RS256 completo",
-            "token": _raw({"alg": "RS256", "typ": "JWT"}, {"sub": "u1", **base}),
-        },
-        {
-            "vetor": "PS256 completo",
-            "token": _raw({"alg": "PS256", "typ": "JWT"}, {"sub": "u2", **base}),
-        },
-        {
-            "vetor": "EdDSA completo",
-            "token": _raw({"alg": "EdDSA", "typ": "JWT"}, {"sub": "u3", **base}),
-        },
-        {
-            "vetor": "RS256 com roles",
-            "token": _raw(
-                {"alg": "RS256", "typ": "JWT"},
-                {"sub": "u4", "roles": ["user"], "scope": "read", **base},
-            ),
-        },
-        {
-            "vetor": "RS256 com nbf passado",
-            "token": _raw(
-                {"alg": "RS256", "typ": "JWT"}, {"sub": "u5", "nbf": BENCH_NOW - 60, **base}
-            ),
-        },
-        {
-            "vetor": "ES256 completo",
-            "token": _raw({"alg": "ES256", "typ": "JWT"}, {"sub": "u6", **base}),
-        },
-    ]
+    return _negativos_rs256() + _negativos_ps256() + _negativos_eddsa() + _negativos_es256()
 
 
 def escreve_manifest() -> None:
     manifesto = {
         "now": BENCH_NOW,
         "positivos": [{"vetor": p["vetor"], "esperado": p["esperado"]} for p in positivos()],
-        "negativos": [{"vetor": n["vetor"]} for n in negativos()],
+        "negativos": [{"vetor": n["vetor"], "emissor": n["emissor"]} for n in negativos()],
     }
     with open(os.path.join(BASE, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump(manifesto, fh, ensure_ascii=False, indent=1)

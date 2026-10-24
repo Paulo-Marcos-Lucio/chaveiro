@@ -34,6 +34,18 @@ def wilson(acertos: int, total: int, z: float = 1.96) -> tuple[float, float]:
 
 
 @dataclass
+class ContagemEmissor:
+    """FP e total de um emissor (RS256, PS256, ...) — a unidade da tabela do README."""
+
+    fp: int = 0
+    total: int = 0
+
+    @property
+    def taxa(self) -> float:
+        return self.fp / self.total if self.total else 0.0
+
+
+@dataclass
 class Medicao:
     tp: int = 0
     total_pos: int = 0
@@ -41,6 +53,7 @@ class Medicao:
     total_neg: int = 0
     escaparam: list[str] = field(default_factory=list)  # vetor cujo esperado não disparou
     ruidosos: list[str] = field(default_factory=list)  # negativo que gerou achado
+    fp_por_emissor: dict[str, ContagemEmissor] = field(default_factory=dict)
 
     @property
     def recall(self) -> float:
@@ -58,9 +71,12 @@ def medir(now: int = BENCH_NOW) -> Medicao:
             m.escaparam.append(f"{caso['vetor']} (esperava {caso['esperado']})")
     for caso in negativos():
         m.total_neg += 1
+        contagem = m.fp_por_emissor.setdefault(caso["emissor"], ContagemEmissor())
+        contagem.total += 1
         findings = audit_token(caso["token"], now).findings
         if findings:
             m.fp += 1
+            contagem.fp += 1
             m.ruidosos.append(f"{caso['vetor']}: {[f.check_id for f in findings]}")
     return m
 
@@ -73,6 +89,13 @@ def main() -> None:
         f"  RECALL         : {m.tp}/{m.total_pos} = {m.recall:.0%}   IC95% = [{baixo:.0%} ; {alto:.0%}]"
     )
     print(f"  FALSO-POSITIVO : {m.fp} em {m.total_neg} tokens legítimos")
+    print("  FALSO-POSITIVO POR EMISSOR:")
+    for emissor, contagem in m.fp_por_emissor.items():
+        baixo_e, alto_e = wilson(contagem.fp, contagem.total)
+        print(
+            f"    {emissor:<6}: {contagem.fp}/{contagem.total} = {contagem.taxa:.0%}"
+            f"   IC95% = [{baixo_e:.0%} ; {alto_e:.0%}]"
+        )
     if m.escaparam:
         print("  ESCAPARAM:")
         for item in m.escaparam:

@@ -46,6 +46,26 @@ Medido em 2026-08-04, Python 3.12.8, Windows 11:
 | **Recall** (positivos) | **22/22 = 100%** · IC95% (Wilson) **[85% ; 100%]** |
 | **Falso-positivo** (negativos) | **0 / 6** |
 
+### Composição dos negativos, por emissor
+
+Um total de "0/6" esconde a composição: 3 dos 6 negativos são RS256, e um
+emissor com um único caso (`PS256`, `EdDSA`) carrega um IC de Wilson muito
+mais largo do que o total agregado sugere. `bench/avaliar.py` imprime a
+quebra; aqui vai o retrato medido junto com o total:
+
+| Emissor | FP / total | IC95% (Wilson) |
+|---|---|---|
+| RS256 | 0 / 3 | [0% ; 56%] |
+| PS256 | 0 / 1 | [0% ; 79%] |
+| EdDSA | 0 / 1 | [0% ; 79%] |
+| ES256 | 0 / 1 | [0% ; 79%] |
+
+Cada emissor com n=1 tem um IC que vai até ~79% — "zero falso-positivo" ali é
+o resultado de uma única amostra limpa, não uma garantia. `manifest.json`
+grava o campo `emissor` por negativo; quem adicionar um vetor a um emissor
+existente (ou um emissor novo) faz isso em `bench/gerar.py`, numa função
+`_negativos_<emissor>()` — não numa lista achatada.
+
 ## Regra da casa
 
 Quem alterar detecção **roda esta bateria antes e depois** e registra os dois

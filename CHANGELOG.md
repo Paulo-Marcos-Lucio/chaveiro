@@ -15,6 +15,14 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
   checagem de segmento foi generalizada para rodar idêntica nos dois segmentos (cabeçalho e payload). Coberta
   por caso positivo dedicado, meta-teste de catálogo e teste property-based (Hypothesis) sobre a invariante
   "qualquer segmento com chave repetida ⇒ pelo menos um achado".
+- **`bench/`: falso-positivo quebrado por emissor**: o total agregado "0 em 6" escondia que 3 dos 6 negativos
+  são RS256 e que `PS256`/`EdDSA`/`ES256` têm um único caso cada — um IC de Wilson que vai até ~79% num n=1,
+  bem mais largo do que o total sugere. `bench/gerar.py` passou a montar `negativos()` concatenando um gerador
+  por emissor (`_negativos_rs256()` etc.), cada vetor rotulado com `emissor`; `manifest.json` grava esse campo;
+  `bench/avaliar.py` acumula `fp_por_emissor` e imprime a quebra com IC95% por emissor; `bench/README.md`
+  publica a composição medida. Invariante travada em `tests/test_bench.py`: todo negativo tem `emissor`
+  rotulado, e a soma por emissor bate com o total agregado — um vetor novo esquecido de rótulo, ou uma
+  contagem que vaza do agregador, derruba o CI em vez de aparecer só como um número errado no README.
 
 ### Corrigido
 
