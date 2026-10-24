@@ -257,6 +257,25 @@ CATALOG: dict[str, CheckMeta] = {
             "A04:2025 Cryptographic Failures",
             "CWE-522",
         ),
+        CheckMeta(
+            "logout-token-malformed",
+            "Logout Token fora da forma do OIDC Back-Channel Logout 1.0",
+            Severity.HIGH,
+            "Emita 'events' com o evento de backchannel-logout e nunca inclua 'nonce' num "
+            "Logout Token — um verificador que só confere 'typ' aceita qualquer JWT como "
+            "logout válido, inclusive um ID Token reciclado.",
+            "A07:2025 Authentication Failures",
+            "CWE-287",
+        ),
+        CheckMeta(
+            "cnf-multiple-binding",
+            "'cnf' amarra o token a mais de um método de prova de posse",
+            Severity.MEDIUM,
+            "Amarre o token a UM método de prova de posse (jkt OU jwk OU jwe). Múltiplos "
+            "métodos ao mesmo tempo deixam a validação ambígua entre verificadores.",
+            "A07:2025 Authentication Failures",
+            "CWE-345",
+        ),
     ]
 }
 
