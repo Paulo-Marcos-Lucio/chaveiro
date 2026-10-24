@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from chaveiro.checks.detectors import run_all
-from chaveiro.core.jwt import JWTError, decode
+from chaveiro.core.jwt import JWTError, decode_any
 from chaveiro.core.models import AuditResult, Severity
 
 _BEARER = "bearer "
@@ -20,9 +20,12 @@ _BEARER = "bearer "
 def audit_token(token: str, now: int) -> AuditResult:
     """Decodifica (sem verificar assinatura) e roda todas as checagens passivas.
 
-    Levanta `JWTError` se o token for malformado — o chamador decide o que fazer.
+    Aceita tanto a forma compacta (3 segmentos) quanto a serialização JSON
+    (RFC 7515 §7.2, Flattened/General) — `decode_any` tenta a compacta
+    primeiro. Levanta `JWTError` se nenhuma das duas servir — o chamador
+    decide o que fazer.
     """
-    decoded = decode(token)
+    decoded = decode_any(token)
     return AuditResult(token=decoded, findings=run_all(decoded, now))
 
 
