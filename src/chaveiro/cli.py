@@ -209,11 +209,17 @@ def _emit(texto: str, output: Path | None) -> None:
     Gravar direto em UTF-8 com `-o` evita a armadilha do operador `>` do PowerShell, que
     recodifica a saída linha a linha (lento e sujeito a mojibake em Windows). É também a
     forma de canalizar o JSON para `github/codeql-action/upload-sarif` num passo de CI.
+
+    O `\\n` final é deliberado: `typer.echo` (stdout) sempre termina a saída com uma quebra
+    de linha, e o arquivo precisa reproduzir esse mesmo byte para ser byte-idêntico ao
+    stdout equivalente — quem compara `-o laudo.json` com `chaveiro ... > laudo.json` (ou
+    recomputa `artifact_sha256` a partir de qualquer um dos dois) não pode ver divergência
+    que não é do conteúdo, só de como cada canal termina a linha.
     """
     if output is None:
         typer.echo(texto)
     else:
-        output.write_text(texto, encoding="utf-8")
+        output.write_text(texto + "\n", encoding="utf-8")
         err.print(f"[green]laudo salvo em[/] {output}")
 
 
