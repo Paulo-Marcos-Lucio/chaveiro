@@ -26,6 +26,7 @@ from chaveiro.core.jwt import JWTError, decode, encode_hmac
 from chaveiro.core.models import DecodedToken, Severity
 from chaveiro.report import console as console_report
 from chaveiro.report.json_report import batch_to_json, to_json
+from chaveiro.report.sarif import batch_to_sarif, to_sarif
 
 app = typer.Typer(
     add_completion=False,
@@ -64,6 +65,7 @@ _AVISO_CLAIMS_COMPLETAS = (
 class Format(str, Enum):
     console = "console"
     json = "json"
+    sarif = "sarif"
 
 
 class FailOn(str, Enum):
@@ -185,8 +187,10 @@ def inspect(
 ) -> None:
     """Decodifica e roda todas as checagens passivas de segurança."""
     token = _resolve_token(token)
-    if output is not None and fmt is not Format.json:
-        raise typer.BadParameter("--output exige --format json (o console é para o terminal).")
+    if output is not None and fmt is Format.console:
+        raise typer.BadParameter(
+            "--output exige --format json ou sarif (o console é para o terminal)."
+        )
     if claims_completas:
         err.print(f"[yellow]{_AVISO_CLAIMS_COMPLETAS}[/]")
     try:
@@ -197,6 +201,8 @@ def inspect(
     redact = not claims_completas
     if fmt is Format.json:
         _emit(to_json(result, redact=redact), output)
+    elif fmt is Format.sarif:
+        _emit(to_sarif(result), output)
     else:
         console_report.render(result, redact=redact)
     top = result.max_severity()
@@ -260,8 +266,10 @@ def batch(
     e não derruba o build. O 2 fica reservado a erro de uso (opção inválida,
     arquivo ilegível), como manda a convenção do Click.
     """
-    if output is not None and fmt is not Format.json:
-        raise typer.BadParameter("--output exige --format json (o console é para o terminal).")
+    if output is not None and fmt is Format.console:
+        raise typer.BadParameter(
+            "--output exige --format json ou sarif (o console é para o terminal)."
+        )
     text = _read_source(path)
     if claims_completas:
         err.print(f"[yellow]{_AVISO_CLAIMS_COMPLETAS}[/]")
@@ -272,6 +280,8 @@ def batch(
     redact = not claims_completas
     if fmt is Format.json:
         _emit(batch_to_json(outcomes, redact=redact), output)
+    elif fmt is Format.sarif:
+        _emit(batch_to_sarif(outcomes), output)
     else:
         console_report.render_batch(outcomes, redact=redact)
     summary = summarize(outcomes)
