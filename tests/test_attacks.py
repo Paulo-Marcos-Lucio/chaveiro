@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
 
 from chaveiro.attacks.confusion import forge_rs_to_hs
 from chaveiro.attacks.crack import crack, crack_with_defaults
@@ -29,6 +31,27 @@ def test_crack_ignores_non_hmac() -> None:
     # um token RS256 não é atacável por dicionário HMAC
     token = decode(raw_token({"alg": "RS256"}, {"sub": "a"}))
     assert crack_with_defaults(token) is None
+
+
+@settings(max_examples=200)
+@given(
+    secret=st.text(
+        alphabet=st.characters(min_codepoint=0x21, max_codepoint=0x7E), min_size=8, max_size=32
+    ),
+    candidatos=st.lists(st.text(min_size=0, max_size=20), max_size=20),
+)
+def test_crack_segredo_forte_nunca_da_falso_positivo(secret: str, candidatos: list[str]) -> None:
+    """INVARIANTE (a classe, não o exemplo isolado): se o segredo real não está entre os
+    candidatos testados, `crack` tem que devolver `None` — nunca "acertar" um candidato
+    que não verifica a assinatura. Um dicionário fixo de exemplos (como
+    `test_crack_fails_on_strong_secret`) só prova UM segredo forte; isto varre milhares
+    de pares (segredo, lista de candidatos) gerados ao acaso e prova a propriedade em si:
+    o único jeito de `crack` devolver algo diferente de `None` é aquele algo verificar de
+    verdade a assinatura HMAC — não há atalho por coincidência de prefixo/tamanho/etc.
+    """
+    assume(secret not in candidatos)
+    token = decode(hs_token({"sub": "a"}, secret=secret))
+    assert crack(token, candidatos) is None
 
 
 def test_crack_guard_corta_antes_de_iterar() -> None:
