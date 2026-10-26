@@ -6,7 +6,9 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from chaveiro import __version__
+from chaveiro.checks.perfil import PERFIS, Perfil
 from chaveiro.cli import app
+from chaveiro.core.models import Severity
 from tests.conftest import hs_token, raw_token, sign_rs256
 
 runner = CliRunner()
@@ -98,3 +100,34 @@ def test_forge_with_secret() -> None:
     result = runner.invoke(app, ["forge", token, "--secret", "k", "--set", "role=admin"])
     assert result.exit_code == 0
     assert result.stdout.strip().count(".") == 2
+
+
+def test_inspect_perfil_desconhecido_e_erro_de_uso() -> None:
+    token = raw_token({"alg": "none"}, {"sub": "admin"})
+    result = runner.invoke(
+        app, ["inspect", token, "-f", "json", "--now", str(NOW), "--perfil", "nao-existe-9f3a"]
+    )
+    assert result.exit_code == 2
+
+
+def test_inspect_com_perfil_registrado_aplica_teto_e_muda_ruleset_hash() -> None:
+    """Ponta a ponta (CH-11b): --perfil resolve pelo nome, chega em run_all (o teto
+    de severidade aparece no achado) e em ruleset_hash (que fica diferente do
+    laudo sem perfil) — a infraestrutura completa, não só uma peça isolada."""
+    nome = "teste-cli-perfil-9f3a"
+    PERFIS[nome] = Perfil(nome=nome, overrides_severidade={"alg-none": Severity.LOW})
+    try:
+        token = raw_token({"alg": "none"}, {"sub": "admin"})
+        com_perfil = runner.invoke(
+            app, ["inspect", token, "-f", "json", "--now", str(NOW), "--perfil", nome]
+        )
+        sem_perfil = runner.invoke(app, ["inspect", token, "-f", "json", "--now", str(NOW)])
+    finally:
+        del PERFIS[nome]
+    doc_com = json.loads(com_perfil.stdout)
+    doc_sem = json.loads(sem_perfil.stdout)
+    assert doc_com["perfil"] == nome
+    assert doc_sem["perfil"] is None
+    [achado] = [f for f in doc_com["findings"] if f["id"] == "alg-none"]
+    assert achado["severity"] == "low"
+    assert doc_com["ruleset_hash"] != doc_sem["ruleset_hash"]

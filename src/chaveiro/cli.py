@@ -22,6 +22,7 @@ from chaveiro.attacks.crack import crack as crack_secret
 from chaveiro.attacks.crack import crack_with_defaults
 from chaveiro.audit import audit_batch, audit_token, summarize
 from chaveiro.checks.catalog import CATALOG, OWASP_EDITION
+from chaveiro.checks.perfil import PERFIS, Perfil
 from chaveiro.core.jwt import JWTError, decode, encode_hmac
 from chaveiro.core.models import DecodedToken, Severity
 from chaveiro.report import console as console_report
@@ -142,6 +143,20 @@ def _root(
     pass
 
 
+def _resolve_perfil(nome: str | None) -> Perfil | None:
+    """Resolve `--perfil nome` no catálogo `PERFIS` (CH-11b). `None` (omitido) é a
+    régua padrão — não passa por aqui. Nome desconhecido é erro de uso (exit 2), não
+    um perfil vazio silencioso."""
+    if nome is None:
+        return None
+    perfil = PERFIS.get(nome)
+    if perfil is None:
+        disponiveis = ", ".join(sorted(PERFIS)) or "nenhum perfil registrado"
+        err.print(f"[red]Perfil desconhecido:[/] {nome!r} (disponíveis: {disponiveis})")
+        raise typer.Exit(2)
+    return perfil
+
+
 def _decode_or_die(token: str) -> DecodedToken:
     try:
         return decode(token)
@@ -182,6 +197,12 @@ def inspect(
         "--claims-completas",
         help="Mostra as claims em CLARO (PII do titular). Por padrão são redigidas.",
     ),
+    perfil_nome: str | None = typer.Option(
+        None,
+        "--perfil",
+        help="Nome de um perfil de auditoria registrado (tolera um quirk conhecido de um "
+        "emissor específico). Omitido = régua padrão.",
+    ),
 ) -> None:
     """Decodifica e roda todas as checagens passivas de segurança."""
     token = _resolve_token(token)
@@ -189,14 +210,15 @@ def inspect(
         raise typer.BadParameter("--output exige --format json (o console é para o terminal).")
     if claims_completas:
         err.print(f"[yellow]{_AVISO_CLAIMS_COMPLETAS}[/]")
+    perfil = _resolve_perfil(perfil_nome)
     try:
-        result = audit_token(token, now if now is not None else int(time.time()))
+        result = audit_token(token, now if now is not None else int(time.time()), perfil)
     except JWTError as exc:
         err.print("[red]Token inválido:[/]", _txt(exc))
         raise typer.Exit(2) from exc
     redact = not claims_completas
     if fmt is Format.json:
-        _emit(to_json(result, redact=redact), output)
+        _emit(to_json(result, redact=redact, perfil=perfil), output)
     else:
         console_report.render(result, redact=redact)
     top = result.max_severity()
@@ -248,6 +270,12 @@ def batch(
         "--claims-completas",
         help="Mostra as claims em CLARO (PII do titular). Por padrão são redigidas.",
     ),
+    perfil_nome: str | None = typer.Option(
+        None,
+        "--perfil",
+        help="Nome de um perfil de auditoria registrado (tolera um quirk conhecido de um "
+        "emissor específico). Omitido = régua padrão.",
+    ),
 ) -> None:
     """Audita vários tokens (um por linha) de um arquivo ou stdin.
 
@@ -265,13 +293,14 @@ def batch(
     text = _read_source(path)
     if claims_completas:
         err.print(f"[yellow]{_AVISO_CLAIMS_COMPLETAS}[/]")
-    outcomes = audit_batch(text, now if now is not None else int(time.time()))
+    perfil = _resolve_perfil(perfil_nome)
+    outcomes = audit_batch(text, now if now is not None else int(time.time()), perfil)
     if not outcomes:
         err.print("[yellow]Nenhum token encontrado na entrada.[/] (um token por linha)")
         raise typer.Exit(0)
     redact = not claims_completas
     if fmt is Format.json:
-        _emit(batch_to_json(outcomes, redact=redact), output)
+        _emit(batch_to_json(outcomes, redact=redact, perfil=perfil), output)
     else:
         console_report.render_batch(outcomes, redact=redact)
     summary = summarize(outcomes)

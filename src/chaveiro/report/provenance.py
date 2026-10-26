@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from chaveiro.checks.catalog import CATALOG, OWASP_EDITION
+from chaveiro.checks.perfil import Perfil
 
 # Versão do schema do CATÁLOGO de regras (não confundir com o schema do envelope
 # JSON, "suite-appsec/1"). Vai EMBUTIDA no blob de que o ``ruleset_hash`` é o
@@ -86,7 +87,7 @@ def commit() -> str | None:
     return _git_head(Path(__file__).resolve().parent)
 
 
-def ruleset_hash() -> str:
+def ruleset_hash(perfil: Perfil | None = None) -> str:
     """Hash estável do catálogo de checagens, no formato auto-descritivo ``sha256:<hex>``.
 
     O prefixo ``sha256:`` (padrão da suíte, o mesmo do Sentinela) diz ao cliente QUAL
@@ -94,6 +95,12 @@ def ruleset_hash() -> str:
     schema do catálogo (:data:`RULESET_SCHEMA`) entra no blob hasheado, então a receita
     de verificação é única entre as ferramentas: mesmo formato de saída e mesmo conjunto
     de campos de entrada.
+
+    ``perfil`` (CH-11b), quando presente, entra no blob hasheado pelo nome e pelo
+    conteúdo (teto de severidade por checagem + nomes das regras extra) — dois laudos
+    de perfis distintos (ou um com/sem perfil) têm ``ruleset_hash`` distintos, porque
+    foram medidos com réguas distintas. Sem perfil (``None``, o padrão), o hash é
+    idêntico ao de antes do CH-11b.
     """
     itens = [
         [
@@ -106,12 +113,21 @@ def ruleset_hash() -> str:
         ]
         for meta in sorted(CATALOG.values(), key=lambda m: m.id)
     ]
-    blob = json.dumps(
-        {"schema_version": RULESET_SCHEMA, "owasp_edition": OWASP_EDITION, "checks": itens},
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    blob_dict: dict[str, object] = {
+        "schema_version": RULESET_SCHEMA,
+        "owasp_edition": OWASP_EDITION,
+        "checks": itens,
+    }
+    if perfil is not None:
+        blob_dict["perfil"] = {
+            "nome": perfil.nome,
+            "overrides_severidade": {
+                check_id: severidade.value
+                for check_id, severidade in sorted(perfil.overrides_severidade.items())
+            },
+            "regras_extra": sorted(regra.__name__ for regra in perfil.regras_extra),
+        }
+    blob = json.dumps(blob_dict, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return f"sha256:{hashlib.sha256(blob.encode('utf-8')).hexdigest()}"
 
 

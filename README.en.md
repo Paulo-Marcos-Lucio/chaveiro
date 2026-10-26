@@ -16,7 +16,7 @@
 [![MIT License](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-license.svg)](LICENSE)
 [![Ruff lint](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-ruff.svg)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-mypy.svg)](https://mypy-lang.org/)
-[![250 tests passing](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-tests.svg)](#-engineering-quality--method)
+[![261 tests passing](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-tests.svg)](#-engineering-quality--method)
 [![95% coverage](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-coverage.svg)](#-engineering-quality--method)
 [![OWASP 2025 · A07/A04](https://raw.githubusercontent.com/Paulo-Marcos-Lucio/chaveiro/main/assets/chip-owasp.svg)](https://owasp.org/Top10/2025/)
 
@@ -266,7 +266,7 @@ src/chaveiro/
 
 ## 🔬 Engineering quality & method
 
-**Gates (measured now, not promised):** **250 tests** passing (including *property-based* tests with Hypothesis) · **95%** coverage (the gate is enforced at `--cov-fail-under=90`) · `mypy --strict` clean across **20 files** · `ruff` (lint + format) clean · CI on a **Python 3.10 / 3.11 / 3.12 / 3.13** matrix.
+**Gates (measured now, not promised):** **261 tests** passing (including *property-based* tests with Hypothesis) · **95%** coverage (the gate is enforced at `--cov-fail-under=90`) · `mypy --strict` clean across **21 files** · `ruff` (lint + format) clean · CI on a **Python 3.10 / 3.11 / 3.12 / 3.13** matrix.
 
 **A test that goes red if detection gets silently undone.** The suite doesn't just confirm the positive case — it guards against *silent inversion*. Each detector has a negative counterpart (`_CASOS_NEGATIVOS` in `tests/test_detectors.py`): swapping `nbf > agora` for `nbf < agora` would pass any test that only looks at the positive case, but it leaves the negative one red. And a meta-test (`test_toda_checagem_do_catalogo_tem_caso_positivo`) fails the build if a new check is born without a case exercising it — human discipline turned into an invariant.
 
