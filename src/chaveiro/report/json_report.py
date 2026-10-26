@@ -15,6 +15,7 @@ from typing import Any
 from chaveiro import __version__
 from chaveiro.audit import TokenOutcome, summarize
 from chaveiro.checks.catalog import OWASP_EDITION
+from chaveiro.checks.perfil import Perfil
 from chaveiro.core.models import AuditResult, Finding, Severity
 from chaveiro.report import provenance
 from chaveiro.report.redaction import redact_claims
@@ -22,7 +23,7 @@ from chaveiro.report.redaction import redact_claims
 SCHEMA = "suite-appsec/1"
 
 
-def _provenance(document: dict[str, Any]) -> dict[str, Any]:
+def _provenance(document: dict[str, Any], perfil: Perfil | None = None) -> dict[str, Any]:
     """Acrescenta commit/ruleset_hash/artifact_sha256 ao envelope (P1-03).
 
     O artifact_sha256 é calculado por ÚLTIMO, sobre o documento já completo menos
@@ -34,7 +35,7 @@ def _provenance(document: dict[str, Any]) -> dict[str, Any]:
     # rodou ("tool"), nunca o de um alvo ("target"). Torna o campo `commit` legível
     # sem ambiguidade quando os laudos das 4 ferramentas chegam ao mesmo painel.
     document["commit_scope"] = "tool"
-    document["ruleset_hash"] = provenance.ruleset_hash()
+    document["ruleset_hash"] = provenance.ruleset_hash(perfil)
     document["artifact_sha256"] = provenance.artifact_sha256(document)
     return document
 
@@ -54,7 +55,11 @@ def finding_to_dict(finding: Finding) -> dict[str, Any]:
 
 
 def to_document(
-    result: AuditResult, *, redact: bool = False, include_provenance: bool = True
+    result: AuditResult,
+    *,
+    redact: bool = False,
+    include_provenance: bool = True,
+    perfil: Perfil | None = None,
 ) -> dict[str, Any]:
     findings = result.sorted()
     counts = {s.value: 0 for s in Severity}
@@ -68,6 +73,9 @@ def to_document(
         "tool": "chaveiro",
         "version": __version__,
         "owasp_edition": OWASP_EDITION,
+        # CH-11b: nome do perfil de auditoria usado (None = régua padrão), para que
+        # quem lê o laudo não precise recomputar o ruleset_hash para descobrir a régua.
+        "perfil": perfil.nome if perfil is not None else None,
         "token": {
             "alg": result.token.alg,
             "header": result.token.header,
@@ -80,27 +88,33 @@ def to_document(
     }
     # No batch a proveniência fica no envelope de fora — evita um subprocesso git
     # por token e um hash por sub-documento.
-    return _provenance(document) if include_provenance else document
+    return _provenance(document, perfil) if include_provenance else document
 
 
-def to_json(result: AuditResult, *, redact: bool = False) -> str:
-    return json.dumps(to_document(result, redact=redact), indent=2, ensure_ascii=False)
+def to_json(result: AuditResult, *, redact: bool = False, perfil: Perfil | None = None) -> str:
+    return json.dumps(
+        to_document(result, redact=redact, perfil=perfil), indent=2, ensure_ascii=False
+    )
 
 
-def _outcome_to_dict(outcome: TokenOutcome, *, redact: bool) -> dict[str, Any]:
+def _outcome_to_dict(
+    outcome: TokenOutcome, *, redact: bool, perfil: Perfil | None = None
+) -> dict[str, Any]:
     return {
         "index": outcome.index,
         "line": outcome.line,
         "error": outcome.error,
         "audit": (
-            to_document(outcome.result, redact=redact, include_provenance=False)
+            to_document(outcome.result, redact=redact, include_provenance=False, perfil=perfil)
             if outcome.result is not None
             else None
         ),
     }
 
 
-def batch_to_document(outcomes: list[TokenOutcome], *, redact: bool = False) -> dict[str, Any]:
+def batch_to_document(
+    outcomes: list[TokenOutcome], *, redact: bool = False, perfil: Perfil | None = None
+) -> dict[str, Any]:
     summary = summarize(outcomes)
     document = {
         "schema": SCHEMA,
@@ -108,6 +122,7 @@ def batch_to_document(outcomes: list[TokenOutcome], *, redact: bool = False) -> 
         "version": __version__,
         "owasp_edition": OWASP_EDITION,
         "mode": "batch",
+        "perfil": perfil.nome if perfil is not None else None,
         "summary": {
             "tokens": summary.tokens,
             "audited": summary.audited,
@@ -115,10 +130,14 @@ def batch_to_document(outcomes: list[TokenOutcome], *, redact: bool = False) -> 
             "by_severity": summary.by_severity,
             "max_severity": summary.max_severity.value if summary.max_severity else None,
         },
-        "results": [_outcome_to_dict(o, redact=redact) for o in outcomes],
+        "results": [_outcome_to_dict(o, redact=redact, perfil=perfil) for o in outcomes],
     }
-    return _provenance(document)
+    return _provenance(document, perfil)
 
 
-def batch_to_json(outcomes: list[TokenOutcome], *, redact: bool = False) -> str:
-    return json.dumps(batch_to_document(outcomes, redact=redact), indent=2, ensure_ascii=False)
+def batch_to_json(
+    outcomes: list[TokenOutcome], *, redact: bool = False, perfil: Perfil | None = None
+) -> str:
+    return json.dumps(
+        batch_to_document(outcomes, redact=redact, perfil=perfil), indent=2, ensure_ascii=False
+    )
