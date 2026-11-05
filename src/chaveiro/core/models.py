@@ -41,6 +41,15 @@ class DecodedToken:
     # outro JWS compacto em vez de um objeto JSON. Nesse caso `payload` fica
     # vazio — a casca não tem claims próprias.
     nested: str | None = None
+    # Chaves que apareceram repetidas no JSON do header e/ou do payload (em
+    # qualquer nível de objeto). RFC 8259 permite a sintaxe mas não diz qual
+    # valor vence; parsers diferentes decidem diferente (json.loads: último
+    # vence). Um token com {"alg":"none","alg":"HS256"} pode ser lido como
+    # "none" por um verificador e "HS256" por outro — a mesma ambiguidade de
+    # classe que já rendeu confusão de algoritmo. `decode()` nunca falha por
+    # isso; só registra, para o auditor ver o que um verificador tolerante
+    # poderia discordar.
+    duplicate_keys: tuple[str, ...] = ()
 
     @property
     def alg(self) -> str:
