@@ -5,7 +5,7 @@ import pytest
 from chaveiro.checks.catalog import CATALOG
 from chaveiro.checks.detectors import _is_sensitive_key, run_all
 from chaveiro.core.jwt import decode
-from chaveiro.core.models import Severity
+from chaveiro.core.models import Confidence, FindingType, Severity
 from tests.conftest import hs_token, raw_token
 
 NOW = 1_800_000_000
@@ -99,6 +99,23 @@ def test_toda_checagem_do_catalogo_tem_caso_positivo() -> None:
     """
     testados = {cid for cid, _, _ in _CASOS_POSITIVOS}
     assert set(CATALOG) - testados == set()
+
+
+def test_toda_checagem_declara_type_e_confidence() -> None:
+    """EV-11: `type`/`confidence` no `-f json` só é contrato de verdade se NENHUMA
+    checagem puder escapar sem declará-los. `CheckMeta.finding_type`/`.confidence`
+    já são `kw_only` obrigatórios (uma entrada nova sem os dois quebra a
+    importação do módulo, antes deste teste rodar) — este teste é o que falha
+    explicitamente, com a mensagem certa, se um valor escapar do enum (`None`,
+    string solta) em vez de ser pego só pela mensagem genérica do Python.
+    """
+    sem_type_ou_confidence = [
+        meta.id
+        for meta in CATALOG.values()
+        if not isinstance(meta.finding_type, FindingType)
+        or not isinstance(meta.confidence, Confidence)
+    ]
+    assert sem_type_ou_confidence == []
 
 
 # --------------------------------------------------------------------------- #

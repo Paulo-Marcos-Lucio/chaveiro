@@ -45,6 +45,11 @@ def finding_to_dict(finding: Finding) -> dict[str, Any]:
         "title": finding.title,
         "severity": finding.severity.value,
         "severity_rank": finding.severity.rank,
+        # `type`: dimensão do token onde o achado vive (ver `FindingType`).
+        # `confidence`: confiança de que é um problema real, não confiança de
+        # parsing (ver `Confidence`) — herdada do catálogo, não medida por achado.
+        "type": finding.finding_type.value,
+        "confidence": finding.confidence.value,
         "detail": finding.detail,
         "evidence": finding.evidence,
         "cwe": finding.cwe,

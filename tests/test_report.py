@@ -7,7 +7,7 @@ from rich.console import Console
 
 from chaveiro.checks.detectors import run_all
 from chaveiro.core.jwt import decode
-from chaveiro.core.models import AuditResult
+from chaveiro.core.models import AuditResult, Confidence, FindingType
 from chaveiro.report.console import render
 from chaveiro.report.json_report import to_json
 from tests.conftest import raw_token
@@ -31,6 +31,12 @@ def test_json_structure() -> None:
     assert any(f["id"] == "alg-none" for f in doc["findings"])
     # by_severity sempre com as 5 chaves, mesmo as zeradas.
     assert set(doc["summary"]["by_severity"]) == {"critical", "high", "medium", "low", "info"}
+    # EV-11: todo achado real do JSON traz `type`/`confidence` — não só as
+    # checagens do catálogo em abstrato, o achado que de fato sai no relatório.
+    assert doc["findings"]
+    for finding in doc["findings"]:
+        assert finding["type"] in {t.value for t in FindingType}
+        assert finding["confidence"] in {c.value for c in Confidence}
 
 
 def test_console_render_does_not_crash() -> None:

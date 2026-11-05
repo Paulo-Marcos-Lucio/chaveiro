@@ -324,7 +324,7 @@ src/chaveiro/
 **Padrões que estão de fato no código:**
 - **Separação de responsabilidades:** detecção (`checks/detectors.py`, decide *quando* emitir) × taxonomia (`checks/catalog.py`, os metadados) × orquestração (`audit.py`) × renderização (`report/console.py` e `report/json_report.py`).
 - **Fonte única de verdade:** o mapa OWASP 2025 / CWE de cada achado vive só no `CATALOG` de `catalog.py`; a edição do OWASP é constante explícita (`OWASP_EDITION`), porque `A03` muda de significado entre 2021 e 2025.
-- **Contrato de saída versionado:** JSON com `schema: "suite-appsec/1"`, `severity_rank` e `by_severity` sempre com as 5 chaves (inclusive zeradas) — um painel ordena e agrega sem fazer parsing do rótulo.
+- **Contrato de saída versionado:** JSON com `schema: "suite-appsec/1"`, `severity_rank` e `by_severity` sempre com as 5 chaves (inclusive zeradas) — um painel ordena e agrega sem fazer parsing do rótulo. Todo achado também traz `type` (`algorithm`/`claim`/`header`/`payload` — a dimensão do token) e `confidence` (`high`/`medium`/`low` — confiança de que é um problema real, não confiança de parsing); um meta-teste (`test_toda_checagem_declara_type_e_confidence`) reprova o build se uma checagem do catálogo nascer sem os dois.
 - **Tipos estritos e imutabilidade:** os modelos de domínio são `@dataclass(frozen=True)` (`DecodedToken`, `Finding`, `CheckMeta`); `mypy --strict` sobre `src`.
 
 **Cadeia de suprimentos do próprio repo:** as actions do CI são fixadas por **SHA** (não por tag móvel), com o **Dependabot** atualizando esses SHAs mensalmente — `github-actions` e `pip`. Fixar sem Dependabot congelaria a versão vulnerável para sempre; as duas peças só fazem sentido juntas.
