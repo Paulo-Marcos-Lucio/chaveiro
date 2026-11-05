@@ -41,6 +41,19 @@ class DecodedToken:
     # outro JWS compacto em vez de um objeto JSON. Nesse caso `payload` fica
     # vazio — a casca não tem claims próprias.
     nested: str | None = None
+    # "compact" (RFC 7515 §3.1, os 3 segmentos pontuados — a forma comum) ou
+    # "json" (§7.2, Flattened ou General): o token veio de um objeto JSON em
+    # vez da string compacta. Checks que assumem a forma compacta (ex.: que
+    # recompõem `raw` a partir de 3 partes) precisam saber distinguir.
+    serialization: str = "compact"
+    # Chaves fora do esquema canônico da serialização JSON (RFC 7515 §7.2):
+    # qualquer coisa que não seja payload/protected/header/signature
+    # (Flattened) ou payload/signatures (General) mais protected/header/
+    # signature de dentro da entrada de assinatura usada. Vazio na forma
+    # compacta. Um campo extra pode ser metadado inócuo (ex.: "kid" fora do
+    # lugar) ou pode ser o verificador real lendo algo que este decodificador
+    # ignorou — por isso fica visível, não descartado em silêncio.
+    extra_fields: dict[str, Any] = field(default_factory=dict)
 
     @property
     def alg(self) -> str:

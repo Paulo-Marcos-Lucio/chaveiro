@@ -128,6 +128,108 @@ def decode(token: str) -> DecodedToken:
     )
 
 
+# Esquema canônico da serialização JSON de um JWS (RFC 7515 §7.2). Qualquer
+# chave fora destes conjuntos vira `extra_fields` em vez de ser descartada.
+_JWS_JSON_FLAT_KEYS = {"payload", "protected", "header", "signature"}
+_JWS_JSON_GENERAL_KEYS = {"payload", "signatures"}
+_JWS_JSON_SIG_KEYS = {"protected", "header", "signature"}
+
+
+def decode_json_serialization(raw: str) -> DecodedToken:
+    """Decodifica a serialização JSON de um JWS (RFC 7515 §7.2) — Flattened
+    (§7.2.2) ou General (§7.2.1) — em vez da forma compacta de 3 segmentos.
+
+    Só a parte **protegida** é suportada: ``protected`` (base64url de um
+    objeto JSON) é a única que entra no ``signing_input`` (RFC 7515 §5.1 — o
+    ``header`` não-protegido nunca é verificado, é conveniência de
+    transporte). JWS só-com-header-não-protegido não tem o que auditar como
+    assinatura e vira ``JWTError``.
+
+    Na forma **General**, ``signatures`` é uma lista porque o mesmo payload
+    pode ter vários signatários independentes; este decodificador expõe só o
+    **primeiro** — ``DecodedToken`` modela um signatário, não N. É uma
+    limitação documentada, não um descarte silencioso: qualquer campo da
+    entrada escolhida que não seja canônico ainda cai em ``extra_fields``.
+
+    Marca ``serialization="json"`` no resultado (o ``decode()`` compacto
+    deixa o default ``"compact"``) e devolve em ``extra_fields`` toda chave
+    fora do esquema — do objeto de topo e da entrada de assinatura usada.
+    """
+    data = parse_json_limited(raw.encode("utf-8"), "serialização JSON")
+    if not isinstance(data, dict):
+        raise JWTError("serialização JSON de JWS deve ser um objeto")
+
+    if "signatures" in data:
+        signatures = data["signatures"]
+        if not isinstance(signatures, list) or not signatures:
+            raise JWTError("'signatures' deve ser uma lista não vazia (General, RFC 7515 §7.2.1)")
+        sig_entry = signatures[0]
+        if not isinstance(sig_entry, dict):
+            raise JWTError("cada entrada de 'signatures' deve ser um objeto JSON")
+        extra_fields = {k: v for k, v in data.items() if k not in _JWS_JSON_GENERAL_KEYS}
+        extra_fields.update({k: v for k, v in sig_entry.items() if k not in _JWS_JSON_SIG_KEYS})
+    else:
+        sig_entry = data
+        extra_fields = {k: v for k, v in data.items() if k not in _JWS_JSON_FLAT_KEYS}
+
+    payload_b64 = data.get("payload")
+    protected_b64 = sig_entry.get("protected")
+    signature_b64 = sig_entry.get("signature")
+    if not (
+        isinstance(payload_b64, str)
+        and isinstance(protected_b64, str)
+        and isinstance(signature_b64, str)
+    ):
+        raise JWTError(
+            "serialização JSON de JWS requer 'payload', 'protected' e 'signature' "
+            "(RFC 7515 §7.2) como strings base64url"
+        )
+
+    unprotected = sig_entry.get("header", {})
+    if not isinstance(unprotected, dict):
+        raise JWTError("'header' (não-protegido) deve ser um objeto JSON")
+
+    header = _decode_json(protected_b64, "protected")
+    merged_header = {**unprotected, **header}  # protected vence num conflito de chave
+
+    payload, nested = _decode_payload(payload_b64)
+    signature = b64url_decode(signature_b64)
+    signing_input = f"{protected_b64}.{payload_b64}".encode("ascii")
+
+    return DecodedToken(
+        raw=raw,
+        header=merged_header,
+        payload=payload,
+        signature=signature,
+        signing_input=signing_input,
+        nested=nested,
+        serialization="json",
+        extra_fields=extra_fields,
+    )
+
+
+def decode_any(raw: str) -> DecodedToken:
+    """Tenta a forma compacta primeiro (RFC 7515 §3.1 — ~100% dos tokens
+    reais) e cai para a serialização JSON (§7.2) só quando a entrada tem cara
+    de objeto JSON. Essa ordem evita dois problemas: pagar um parse JSON
+    extra em todo token normal, e confundir quem colou lixo (nem compacto
+    nem JSON) com uma mensagem sobre "objeto JSON" quando o problema real é
+    outro.
+    """
+    try:
+        return decode(raw)
+    except JWTError as compact_error:
+        if raw.strip()[:1] != "{":
+            raise
+        try:
+            return decode_json_serialization(raw)
+        except JWTError as json_error:
+            raise JWTError(
+                f"não decodificou nem como JWS compacto ({compact_error}) "
+                f"nem como serialização JSON ({json_error})"
+            ) from json_error
+
+
 def parse_json_limited(raw: bytes, what: str) -> Any:
     """``json.loads`` com teto **explícito** de aninhamento.
 
