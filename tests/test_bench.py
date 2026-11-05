@@ -50,3 +50,32 @@ def test_gerar_materializa_e_manifest_bate_com_o_corpus(tmp_path: object) -> Non
     esperados_manifest = [p["esperado"] for p in manifesto["positivos"]]
     esperados_corpus = [p["esperado"] for p in gerar.positivos()]  # type: ignore[attr-defined]
     assert esperados_manifest == esperados_corpus
+    emissores_manifest = [n["emissor"] for n in manifesto["negativos"]]
+    emissores_corpus = [n["emissor"] for n in gerar.negativos()]  # type: ignore[attr-defined]
+    assert emissores_manifest == emissores_corpus
+
+
+def test_todo_negativo_tem_emissor_rotulado() -> None:
+    """Trava a classe: um negativo novo sem 'emissor' não pode entrar no corpus.
+
+    P2-05 publicava um total de FP sem quebra por emissor. A quebra só é
+    honesta se TODO negativo carregar o rótulo — um esquecimento silencioso
+    faria `fp_por_emissor` somar menos que `total_neg` sem avisar ninguém.
+    """
+    gerar = _load("gerar")
+    negs = gerar.negativos()  # type: ignore[attr-defined]
+    assert negs, "corpus de negativos vazio"
+    for n in negs:
+        assert n.get("emissor"), f"negativo sem emissor: {n['vetor']}"
+
+
+def test_fp_por_emissor_soma_bate_com_o_total() -> None:
+    """Invariante de contabilidade: a quebra por emissor não pode perder nem
+    duplicar um caso do total agregado — para qualquer tamanho de corpus.
+    """
+    avaliar = _load("avaliar")
+    m = avaliar.medir()  # type: ignore[attr-defined]
+    soma_total = sum(c.total for c in m.fp_por_emissor.values())
+    soma_fp = sum(c.fp for c in m.fp_por_emissor.values())
+    assert soma_total == m.total_neg
+    assert soma_fp == m.fp
