@@ -7,6 +7,19 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
 
 ### Adicionado
 
+- **Formato de saída `sarif`** (`--format sarif`/`-f sarif`, em `inspect` e `batch`): laudo em
+  SARIF 2.1.0, para consumo direto pela aba Security do GitHub Code Scanning
+  (`upload-sarif`). `tool.driver.rules` carrega o catálogo **inteiro** (inclusive as checagens
+  que não dispararam), não só os achados do token — é o que faz a aba mostrar a regra
+  configurada e silenciosa. Sem arquivo nem linha para apontar (o Chaveiro audita um *token*,
+  não varre um repositório), a localização de cada achado é **lógica**
+  (`locations[].logicalLocations`, com `fullyQualifiedName` do tipo `token/header` ou
+  `token/payload`), não física. No `batch`, cada resultado carrega o índice do token de origem
+  (`properties.tokenIndex` e o prefixo `token[N]/`) para não colidir achados idênticos de
+  tokens diferentes no mesmo lote. O fingerprint (`partialFingerprints`) é estável entre
+  execuções do mesmo token — condição para o Code Scanning reconhecer o alerta já aberto em vez
+  de abrir um novo a cada rodada. A redação de PII no SARIF fica para um item separado; por ora
+  o formato carrega a mesma informação estrutural que o `console`/`json` já expõem.
 - **Nova checagem `payload-duplicate-key`** (HIGH · A07:2025 · CWE-347): chave repetida no **payload**,
   simétrica à `header-duplicate-key` que já existia. `json.loads` fica com a *última* ocorrência; um parser
   *first-wins* fica com a *primeira* — a divergência é o ataque. Um `role`/`exp`/`aud` duplicado deixa um
