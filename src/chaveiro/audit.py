@@ -11,19 +11,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from chaveiro.checks.detectors import run_all
+from chaveiro.checks.perfil import Perfil
 from chaveiro.core.jwt import JWTError, decode
 from chaveiro.core.models import AuditResult, Severity
 
 _BEARER = "bearer "
 
 
-def audit_token(token: str, now: int) -> AuditResult:
+def audit_token(token: str, now: int, perfil: Perfil | None = None) -> AuditResult:
     """Decodifica (sem verificar assinatura) e roda todas as checagens passivas.
 
     Levanta `JWTError` se o token for malformado — o chamador decide o que fazer.
     """
     decoded = decode(token)
-    return AuditResult(token=decoded, findings=run_all(decoded, now))
+    return AuditResult(token=decoded, findings=run_all(decoded, now, perfil))
 
 
 @dataclass(frozen=True)
@@ -64,7 +65,7 @@ def iter_candidates(text: str) -> list[tuple[int, str]]:
     return candidates
 
 
-def audit_batch(text: str, now: int) -> list[TokenOutcome]:
+def audit_batch(text: str, now: int, perfil: Perfil | None = None) -> list[TokenOutcome]:
     """Audita todos os candidatos a token do texto, preservando a ordem.
 
     Um token que falhe **por qualquer motivo** vira um `TokenOutcome` com
@@ -77,7 +78,7 @@ def audit_batch(text: str, now: int) -> list[TokenOutcome]:
     outcomes: list[TokenOutcome] = []
     for index, (lineno, candidate) in enumerate(iter_candidates(text), start=1):
         try:
-            result = audit_token(candidate, now)
+            result = audit_token(candidate, now, perfil)
         except JWTError as exc:
             outcomes.append(TokenOutcome(index, lineno, candidate, None, str(exc)))
         except Exception as exc:

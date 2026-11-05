@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from chaveiro.checks.catalog import make_finding
+from chaveiro.checks.perfil import Perfil
 from chaveiro.core.jwt import JWTError, b64url_decode, decode, looks_like_jws
 from chaveiro.core.models import DecodedToken, Finding
 
@@ -142,9 +143,13 @@ _CTY_NESTED = {"jwt", "application/jwt"}
 _MAX_NESTED_DEPTH = 512
 
 
-def _run_camada(token: DecodedToken, now: int) -> list[Finding]:
+def _run_camada(token: DecodedToken, now: int, perfil: Perfil | None = None) -> list[Finding]:
     """Bateria COMPLETA de checagens de UMA camada (sem descer no aninhamento — a descida e
-    do laco em run_all). Extraida para rodar identica em cada nivel de um JWT aninhado."""
+    do laco em run_all). Extraida para rodar identica em cada nivel de um JWT aninhado.
+
+    Sem perfil (``None``) o caminho é idêntico ao de antes do CH-11b: as duas linhas de
+    `perfil` só executam quando um perfil é passado, então o laudo padrão não muda nem
+    por um byte com a introdução deste parâmetro."""
     findings: list[Finding] = []
     findings += check_alg(token)
     findings += check_header(token)
@@ -153,15 +158,19 @@ def _run_camada(token: DecodedToken, now: int) -> list[Finding]:
     findings += check_nesting(token)
     findings += check_claims(token, now)
     findings += check_payload(token)
+    if perfil is not None:
+        findings += perfil.rodar_extra(token, now)
+        findings = perfil.aplicar_teto(findings)
     return findings
 
 
-def run_all(token: DecodedToken, now: int) -> list[Finding]:
-    findings = _run_camada(token, now)
+def run_all(token: DecodedToken, now: int, perfil: Perfil | None = None) -> list[Finding]:
+    findings = _run_camada(token, now, perfil)
     # JWT aninhado: as vulnerabilidades moram nas camadas INTERNAS (casca HS256 envolvendo um
     # miolo alg:none a N niveis, com jku/kid/segredo dentro). Auditar so a casca — ou so 1 nivel
     # com check_alg — cega o vetor. Descemos por `token.nested` rodando a bateria COMPLETA em
-    # cada camada, com TETO de profundidade e protecao contra ciclo (FN J1 e alem).
+    # cada camada, com TETO de profundidade e protecao contra ciclo (FN J1 e alem). O perfil
+    # (regras extra + teto de severidade) se aplica em CADA camada, não só na casca.
     vistos = {token.raw}
     interno_raw = token.nested
     profundidade = 1
@@ -173,7 +182,7 @@ def run_all(token: DecodedToken, now: int) -> list[Finding]:
             interno = decode(interno_raw)
         except JWTError:
             break
-        findings += _run_camada(interno, now)
+        findings += _run_camada(interno, now, perfil)
         interno_raw = interno.nested
         profundidade += 1
     return findings
