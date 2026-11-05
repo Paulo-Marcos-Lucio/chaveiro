@@ -38,6 +38,12 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
   (`^[0-9a-f]{40}$`) — um valor malformado (`HEAD`, SHA truncado) é ignorado em vez de carimbado. Invariante
   travada por teste (revert→vermelho): rodando de dentro de um repositório git qualquer, o commit carimbado é o
   do pacote, nunca o do CWD.
+- **`-o/--output` — arquivo agora é byte-idêntico ao stdout equivalente**: `_emit` gravava o laudo sem a quebra
+  de linha final que `typer.echo` sempre acrescenta no stdout, então `chaveiro inspect ... -o laudo.json`
+  divergia do `chaveiro inspect ... > laudo.json` equivalente por um byte (`\n`). Corrigido gravando `texto +
+  "\n"`. Invariante travada por teste property-based (`tests/test_output_flag.py`): para qualquer claim gerada,
+  o arquivo de `-o` é byte-idêntico ao stdout do mesmo comando sem `-o`, nada vaza para o stdout, e o
+  `artifact_sha256` recomputado sobre o documento gravado confere — em `inspect` e em `batch`.
 
 ### Documentação
 
@@ -47,6 +53,8 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
   descritor de recurso como metadado, e o gate por valor sob qualquer chave), somada à calibração de refresh
   token do `claim-long-lifetime`; e a seção de proveniência e a linha `CHAVEIRO_COMMIT` passaram a descrever a
   resolução do commit pelo diretório do pacote e o gate de 40 hex.
+- **README (PT/EN) — `-o/--output` documentado**: linha na tabela de opções e nota explicando por que grava
+  direto em UTF-8 em vez de imprimir (armadilha do operador `>` do PowerShell, que recodifica linha a linha).
 
 ## [0.5.0] — 2026-08-05
 
