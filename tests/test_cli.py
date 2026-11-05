@@ -66,6 +66,26 @@ def test_crack_wordlist_streaming(tmp_path: Path) -> None:
     assert result.exit_code == 1
 
 
+def test_crack_sem_acerto_imprime_handoff_hashcat() -> None:
+    # Segredo forte, fora da lista embutida: nenhum candidato acerta, e o output tem
+    # que apontar o próximo passo real (hashcat -m 16500) em vez de só dizer "não achei".
+    token = hs_token({"sub": "a"}, secret="Zx9$Kp2!mQ7wLvB3cD5fG6hJ8nR0tY4u")
+    result = runner.invoke(app, ["crack", token])
+    assert result.exit_code == 0
+    assert "hashcat -m 16500" in result.output
+    assert "triagem" in result.output.lower()
+
+
+def test_crack_sem_acerto_com_wordlist_cita_o_arquivo(tmp_path: Path) -> None:
+    wl = tmp_path / "wl.txt"
+    wl.write_text("nope\nother\n", encoding="utf-8")
+    token = hs_token({"sub": "a"}, secret="Zx9$Kp2!mQ7wLvB3cD5fG6hJ8nR0tY4u")
+    result = runner.invoke(app, ["crack", token, "--wordlist", str(wl)])
+    assert result.exit_code == 0
+    assert "hashcat -m 16500" in result.output
+    assert str(wl) in result.output
+
+
 def test_crack_wordlist_inexistente_exit2() -> None:
     token = hs_token({"sub": "a"}, secret="x")
     result = runner.invoke(app, ["crack", token, "--wordlist", "/nao/existe/rockyou.txt"])
