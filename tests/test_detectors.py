@@ -54,6 +54,10 @@ _CASOS_POSITIVOS: list[tuple[str, dict, dict]] = [
     # duplicate-key (header/payload) nao cabe num dict (nao ha como repetir chave); a parte.
     ("header-duplicate-key", {"alg": "HS256"}, {"sub": "a"}),
     ("payload-duplicate-key", {"alg": "HS256"}, {"sub": "a"}),
+    # ecdsa-invalid-point/hmac-length-mismatch precisam de bytes de assinatura especificos
+    # (raw_token(header, payload) usa o default b""); os construtores especiais abaixo montam.
+    ("signature-ecdsa-invalid-point", {"alg": "ES256"}, {"sub": "a"}),
+    ("signature-hmac-length-mismatch", {"alg": "HS256"}, {"sub": "a"}),
 ]
 
 
@@ -76,9 +80,21 @@ def _token_com_claim_duplicada() -> str:
     return f"{h}.{p}."
 
 
+def _token_ecdsa_r_zero() -> str:
+    """ES256 com r=0 (s não-zero) — vetor sintético da assinatura 'psíquica' (CVE-2022-21449)."""
+    return raw_token({"alg": "ES256"}, {"sub": "a"}, signature=b"\x00" * 32 + b"\x01" * 32)
+
+
+def _token_hmac_length_mismatch() -> str:
+    """HS256 com assinatura de 10 bytes — os 32 bytes fixos do algoritmo não batem."""
+    return raw_token({"alg": "HS256"}, {"sub": "a"}, signature=b"\x01" * 10)
+
+
 _CONSTRUTORES_ESPECIAIS = {
     "header-duplicate-key": _token_com_alg_duplicado,
     "payload-duplicate-key": _token_com_claim_duplicada,
+    "signature-ecdsa-invalid-point": _token_ecdsa_r_zero,
+    "signature-hmac-length-mismatch": _token_hmac_length_mismatch,
 }
 
 

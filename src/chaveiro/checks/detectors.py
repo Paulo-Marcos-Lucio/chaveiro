@@ -193,8 +193,29 @@ def _alg_normalizado(alg: Any) -> str | None:
     return normalized.strip()
 
 
+# Tamanho fixo (bytes) do componente r/s de uma assinatura ECDSA em JWS: a codificação é a
+# concatenação crua R||S (RFC 7518 §3.4, IEEE P1363 — não é o DER do X9.62), cada componente
+# com metade do tamanho total. ES512 usa P-521, cujo componente ocupa 66 bytes — ceil(521/8),
+# não 64 — por isso o mapa é por 'alg', não um `len(signature) // 2` genérico.
+_ECDSA_COMPONENT_LEN = {"ES256": 32, "ES256K": 32, "ES384": 48, "ES512": 66}
+# Tamanho fixo (bytes) da saída de um HMAC (RFC 2104, FIPS 198-1) — o algoritmo declarado FIXA
+# o tamanho; qualquer outro comprimento já é assinatura truncada ou malformada.
+_HMAC_SIGNATURE_LEN = {"HS256": 32, "HS384": 48, "HS512": 64}
+
+
 def check_signature(token: DecodedToken) -> list[Finding]:
-    """Assinatura vazia num algoritmo de ASSINATURA = efetivamente nao assinado (FN D1/D2)."""
+    """Assinatura vazia num algoritmo de ASSINATURA = efetivamente nao assinado (FN D1/D2).
+
+    Duas invariantes de FORMA além disso, que uma assinatura genuína nunca viola:
+
+    - ECDSA (ES*): r=0 ou s=0 é a assinatura "psíquica" (CVE-2022-21449). ANSI X9.62/FIPS
+      186-4 exigem 0 < r,s < n — r/s vêm de aritmética modular sobre um nonce aleatório, e a
+      chance de dar exatamente zero é desprezível; só aparece se o verificador não rejeita.
+      Quando isso passa, QUALQUER mensagem verifica sob a chave, sem conhecer o segredo. Só
+      avaliamos quando o comprimento total bate com o dobro do componente do algoritmo —
+      sinal curto/arbitrário (ex.: placeholder de teste) não é "r ou s zero", é outra coisa.
+    - HMAC (HS*): comprimento fixo pelo algoritmo; diferente disso é truncamento/malformação.
+    """
     alg = token.header.get("alg")
     normalized = _alg_normalizado(alg)
     if normalized is not None and normalized.lower() == "none":
@@ -208,7 +229,33 @@ def check_signature(token: DecodedToken) -> list[Finding]:
                 evidence=f"alg={alg!r}, assinatura=<vazia>",
             )
         ]
-    return []
+    out: list[Finding] = []
+    alg_upper = (normalized or "").upper()
+    componente = _ECDSA_COMPONENT_LEN.get(alg_upper)
+    if componente is not None and len(token.signature) == 2 * componente:
+        r, s = token.signature[:componente], token.signature[componente:]
+        r_zero, s_zero = r.count(0) == componente, s.count(0) == componente
+        if r_zero or s_zero:
+            out.append(
+                make_finding(
+                    "signature-ecdsa-invalid-point",
+                    "A assinatura ECDSA tem r ou s igual a zero — nunca ocorre numa assinatura "
+                    "genuína e é a marca da assinatura 'psíquica' (CVE-2022-21449): se o "
+                    "verificador aceitar, qualquer mensagem passa sob esta chave.",
+                    evidence=f"alg={alg!r}, r_zero={r_zero}, s_zero={s_zero}",
+                )
+            )
+    esperado_hmac = _HMAC_SIGNATURE_LEN.get(alg_upper)
+    if esperado_hmac is not None and len(token.signature) != esperado_hmac:
+        out.append(
+            make_finding(
+                "signature-hmac-length-mismatch",
+                f"{alg_upper} produz sempre {esperado_hmac} bytes de assinatura; esta tem "
+                f"{len(token.signature)}. Assinatura truncada ou malformada.",
+                evidence=f"alg={alg!r}, esperado={esperado_hmac}B, recebido={len(token.signature)}B",
+            )
+        )
+    return out
 
 
 def _segmento_primeira_ocorrencia(raw_token: str, idx: int) -> tuple[dict[str, Any], set[str]]:
