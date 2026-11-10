@@ -705,6 +705,9 @@ def _humanize_seconds(seconds: int) -> str:
     return f"~{seconds // _SECONDS_PER_YEAR} anos"
 
 
+_RE_INT_STRING = re.compile(r"^-?\d+$")
+
+
 def _as_epoch(value: Any) -> int | None:
     if isinstance(value, bool):
         return None
@@ -712,4 +715,20 @@ def _as_epoch(value: Any) -> int | None:
         return None  # Infinity/NaN (json.loads aceita esses literais)
     if isinstance(value, (int, float)):
         return int(value)
+    if isinstance(value, str):
+        # NumericDate string-coercível (RFC 7519 §2 exige número, mas libs populares
+        # aceitam string numérica e seguem validando exp/iat/nbf normalmente). Quem
+        # audita e marca isso como claim-malformed-time gera um falso positivo: o
+        # verificador real não trata o token como sem expiração, ele expira do
+        # mesmo jeito. Só NÃO-coercível (string não-numérica, objeto, lista, bool)
+        # é de fato malformado.
+        if _RE_INT_STRING.fullmatch(value):
+            return int(value)
+        try:
+            numero = float(value)
+        except ValueError:
+            return None
+        if not math.isfinite(numero):
+            return None
+        return int(numero)
     return None

@@ -8,14 +8,18 @@ afirmam as propriedades que não podem falhar:
     1. e-mail como valor, sob qualquer chave não-estrutural, é sempre redigido;
     2. CPF válido (mód-11), idem;
     3. chaves estruturais (exp/iat/aud/...) nunca são redigidas — não destruir o laudo.
+    4. claim temporal (exp/iat/nbf) string-numérica coage para o mesmo epoch que o
+       inteiro correspondente — não é "malformed-time" (AUD0908).
 """
 
 from __future__ import annotations
 
+import string
+
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from chaveiro.checks.detectors import has_cpf
+from chaveiro.checks.detectors import _as_epoch, has_cpf
 from chaveiro.report.redaction import REDIGIDO, redact_claims
 
 _CHAVES_INOCENTES = st.sampled_from(["nota", "obs", "custom", "documento", "campo_x", "dados"])
@@ -64,3 +68,22 @@ def test_chave_estrutural_nunca_e_redigida(chave: str, valor: int) -> None:
     """INVARIANTE 3: metadados do token (exp/iat/aud/...) não podem ser destruídos pela redação."""
     saida = redact_claims({chave: valor})
     assert saida[chave] == valor, f"chave estrutural {chave!r} foi redigida indevidamente"
+
+
+@settings(max_examples=200)
+@given(n=st.integers(min_value=-(2**63), max_value=2**63))
+def test_as_epoch_string_decimal_igual_ao_inteiro(n: int) -> None:
+    """INVARIANTE 4 (AUD0908): recorre em exp, iat E nbf porque os três passam por
+    _as_epoch — um NumericDate como string decimal ('"%d"' % n) não pode virar
+    claim-malformed-time: ele aplica para o MESMO epoch que o inteiro equivalente,
+    exatamente como libs de verificação real já fazem ao coagir a claim."""
+    assert _as_epoch(str(n)) == _as_epoch(n) == n
+
+
+@settings(max_examples=100)
+@given(texto=st.text(alphabet=string.ascii_letters, min_size=1, max_size=20))
+def test_as_epoch_string_nao_numerica_continua_none(texto: str) -> None:
+    """Contraparte da invariante acima: só string de fato NÃO-coercível (não bate
+    ^-?\\d+$ nem converte para float finito) continua malformada — a correção não
+    pode silenciar claim-malformed-time para o caso real de token corrompido."""
+    assert _as_epoch(texto) is None
