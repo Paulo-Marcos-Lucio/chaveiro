@@ -11,7 +11,7 @@ from chaveiro.core.jwt import (
     verify_asymmetric,
     verify_hmac,
 )
-from tests.conftest import hs_token, sign_eddsa, sign_ps256
+from tests.conftest import hs_token, jwe_token, sign_eddsa, sign_ps256
 
 
 def test_b64url_roundtrip() -> None:
@@ -43,6 +43,26 @@ def test_decode_rejects_malformed() -> None:
         decode("only.two")
     with pytest.raises(JWTError):
         decode("not-a-jwt")
+    with pytest.raises(JWTError):
+        decode("a.b.c.d")  # 4 segmentos: nem JWS (3) nem JWE (5)
+
+
+def test_decode_recognizes_jwe_five_segments() -> None:
+    """RFC 7516 §7.1: JWE compacto tem 5 segmentos. Antes disto virava JWTError
+    ('esperados 3 segmentos') — o header em claro precisa continuar auditável."""
+    header = {"alg": "RSA-OAEP", "enc": "A256GCM"}
+    decoded = decode(jwe_token(header))
+    assert decoded.is_jwe
+    assert decoded.header == header
+    assert decoded.payload == {}
+    assert decoded.nested is None
+
+
+def test_decode_jwe_without_enc_stays_malformed() -> None:
+    # 5 segmentos mas sem 'enc' no header protegido: RFC 7516 §4.1.2 exige 'enc'
+    # para ser JWE — sem ele não qualifica, e continua malformado por definição.
+    with pytest.raises(JWTError):
+        decode(jwe_token({"alg": "dir"}))
 
 
 def _raw(header_bytes: bytes, payload_bytes: bytes) -> str:

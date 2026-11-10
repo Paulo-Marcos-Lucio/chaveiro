@@ -257,6 +257,43 @@ CATALOG: dict[str, CheckMeta] = {
             "A04:2025 Cryptographic Failures",
             "CWE-522",
         ),
+        CheckMeta(
+            "jwe-pbes2-p2c-alto",
+            "JWE: 'p2c' (iteração PBES2) acima do teto",
+            Severity.MEDIUM,
+            "'p2c' vem do header em claro, lido antes de qualquer verificação. Rejeite um 'p2c' "
+            "acima do que o seu próprio emissor usa — um valor inflado pelo atacante força custo "
+            "de CPU alto em toda tentativa de decifração, mesmo que seja rejeitada depois (DoS).",
+            "A06:2025 Insecure Design",
+            "CWE-400",
+        ),
+        CheckMeta(
+            "jwe-zip-compression",
+            "JWE: 'zip' (compressão) presente",
+            Severity.MEDIUM,
+            "'zip: DEF' comprime o plaintext antes de cifrar (RFC 7516 §4.1.3). Limite o tamanho "
+            "de saída da descompressão — sem teto, é vetor de bomba de descompressão (DoS).",
+            "A06:2025 Insecure Design",
+            "CWE-409",
+        ),
+        CheckMeta(
+            "jwe-alg-dir",
+            "JWE: 'alg: dir' (encriptação direta, sem key wrapping)",
+            Severity.LOW,
+            "Informativo: a chave de gerenciamento é usada DIRETAMENTE como chave de conteúdo. "
+            "Rotação de chave de conteúdo exige rotacionar a própria chave compartilhada.",
+            "A04:2025 Cryptographic Failures",
+            None,
+        ),
+        CheckMeta(
+            "jwe-alg-rsa1-5",
+            "JWE: 'alg: RSA1_5' (RSAES-PKCS1-v1_5) — oráculo de padding",
+            Severity.HIGH,
+            "RSA1_5 é vulnerável a ataque de oráculo de padding (Bleichenbacher): quem observa "
+            "erros de decifração recupera a chave de conteúdo sem a chave privada. Use RSA-OAEP.",
+            "A04:2025 Cryptographic Failures",
+            "CWE-780",
+        ),
     ]
 }
 

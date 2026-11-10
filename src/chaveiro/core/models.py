@@ -41,6 +41,10 @@ class DecodedToken:
     # outro JWS compacto em vez de um objeto JSON. Nesse caso `payload` fica
     # vazio — a casca não tem claims próprias.
     nested: str | None = None
+    # JWE compacto (RFC 7516 §7.1, 5 segmentos): só o header protegido (`header`)
+    # é auditável em claro. `payload`/`signature`/`signing_input` ficam vazios —
+    # o conteúdo está cifrado e o Chaveiro nunca descriptografa.
+    is_jwe: bool = False
 
     @property
     def alg(self) -> str:

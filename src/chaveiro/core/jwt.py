@@ -111,8 +111,12 @@ def decode(token: str) -> DecodedToken:
         token = token[7:].strip()
     token = re.sub(r"\s+", "", token)
     parts = token.split(".")
+    if len(parts) == 5:
+        return _decode_jwe(token, parts)
     if len(parts) != 3:
-        raise JWTError(f"esperados 3 segmentos separados por ponto, encontrei {len(parts)}")
+        raise JWTError(
+            f"esperados 3 segmentos (JWS) ou 5 (JWE) separados por ponto, encontrei {len(parts)}"
+        )
     header_b64, payload_b64, sig_b64 = parts
     header = _decode_json(header_b64, "header")
     payload, nested = _decode_payload(payload_b64)
@@ -125,6 +129,31 @@ def decode(token: str) -> DecodedToken:
         signature=signature,
         signing_input=signing_input,
         nested=nested,
+    )
+
+
+def _decode_jwe(raw_token: str, parts: list[str]) -> DecodedToken:
+    """JWE compacto (RFC 7516 §7.1): header protegido · chave encriptada · IV ·
+    texto cifrado · tag de autenticação. Auditamos SÓ o header protegido (seg0),
+    em claro — nunca descriptografamos nem tocamos rede. `enc` é obrigatório no
+    header protegido de um JWE (RFC 7516 §4.1.2); sem ele, 5 segmentos não
+    qualificam como JWE reconhecido e o token continua malformado (fail-closed:
+    a classe nova não pode engolir token que nem o próprio RFC reconheceria).
+    """
+    header = _decode_json(parts[0], "header")
+    if "enc" not in header:
+        raise JWTError(
+            "token de 5 segmentos sem 'enc' no cabeçalho protegido — não qualifica "
+            "como JWE reconhecido (RFC 7516 §4.1.2 exige 'enc')"
+        )
+    return DecodedToken(
+        raw=raw_token,
+        header=header,
+        payload={},
+        signature=b"",
+        signing_input=b"",
+        nested=None,
+        is_jwe=True,
     )
 
 
