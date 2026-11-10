@@ -6,7 +6,7 @@ from chaveiro.checks.catalog import CATALOG
 from chaveiro.checks.detectors import _is_sensitive_key, run_all
 from chaveiro.core.jwt import decode
 from chaveiro.core.models import Severity
-from tests.conftest import hs_token, raw_token
+from tests.conftest import hs_token, jwe_token, raw_token
 
 NOW = 1_800_000_000
 _INNER_JWT = hs_token({"sub": "admin"}, secret="k")
@@ -54,6 +54,11 @@ _CASOS_POSITIVOS: list[tuple[str, dict, dict]] = [
     # duplicate-key (header/payload) nao cabe num dict (nao ha como repetir chave); a parte.
     ("header-duplicate-key", {"alg": "HS256"}, {"sub": "a"}),
     ("payload-duplicate-key", {"alg": "HS256"}, {"sub": "a"}),
+    # JWE (5 segmentos) — construtor dedicado abaixo; header/payload aqui sao ignorados.
+    ("jwe-pbes2-p2c-alto", {}, {}),
+    ("jwe-zip-compression", {}, {}),
+    ("jwe-alg-dir", {}, {}),
+    ("jwe-alg-rsa1-5", {}, {}),
 ]
 
 
@@ -76,9 +81,31 @@ def _token_com_claim_duplicada() -> str:
     return f"{h}.{p}."
 
 
+def _jwe_com_p2c_alto() -> str:
+    return jwe_token(
+        {"alg": "PBES2-HS256+A128KW", "enc": "A128CBC-HS256", "p2c": 5_000_000, "p2s": "c2FsdA"}
+    )
+
+
+def _jwe_com_zip() -> str:
+    return jwe_token({"alg": "RSA-OAEP", "enc": "A256GCM", "zip": "DEF"})
+
+
+def _jwe_alg_dir() -> str:
+    return jwe_token({"alg": "dir", "enc": "A256GCM"})
+
+
+def _jwe_alg_rsa1_5() -> str:
+    return jwe_token({"alg": "RSA1_5", "enc": "A128CBC-HS256"})
+
+
 _CONSTRUTORES_ESPECIAIS = {
     "header-duplicate-key": _token_com_alg_duplicado,
     "payload-duplicate-key": _token_com_claim_duplicada,
+    "jwe-pbes2-p2c-alto": _jwe_com_p2c_alto,
+    "jwe-zip-compression": _jwe_com_zip,
+    "jwe-alg-dir": _jwe_alg_dir,
+    "jwe-alg-rsa1-5": _jwe_alg_rsa1_5,
 }
 
 
@@ -132,6 +159,49 @@ _CASOS_NEGATIVOS: list[tuple[str, dict, dict]] = [
 )
 def test_caso_negativo_nao_dispara(check_id: str, header: dict, payload: dict) -> None:
     assert check_id not in _ids(raw_token(header, payload))
+
+
+# --------------------------------------------------------------------------- #
+# JWE (AUD0908-fn-jwe-5-segmentos-nao-auditado): casos negativos — a correção
+# não pode acusar um JWE comum/bem formado só porque agora ele é auditado.
+# --------------------------------------------------------------------------- #
+
+_CASOS_NEGATIVOS_JWE: list[tuple[str, dict]] = [
+    # p2c dentro de uma faixa real (RFC 7518 recomenda minimo 1000) nao dispara.
+    ("jwe-pbes2-p2c-alto", {"alg": "PBES2-HS256+A128KW", "enc": "A128CBC-HS256", "p2c": 310_000}),
+    # sem 'zip' no header, nao ha achado de compressao.
+    ("jwe-zip-compression", {"alg": "RSA-OAEP", "enc": "A256GCM"}),
+    # RSA-OAEP (recomendado) nao e nem 'dir' nem 'RSA1_5'.
+    ("jwe-alg-dir", {"alg": "RSA-OAEP", "enc": "A256GCM"}),
+    ("jwe-alg-rsa1-5", {"alg": "RSA-OAEP", "enc": "A256GCM"}),
+]
+
+
+@pytest.mark.parametrize(
+    "check_id, header", _CASOS_NEGATIVOS_JWE, ids=[f"nao-{c[0]}" for c in _CASOS_NEGATIVOS_JWE]
+)
+def test_jwe_caso_negativo_nao_dispara(check_id: str, header: dict) -> None:
+    assert check_id not in _ids(jwe_token(header))
+
+
+def test_jwe_sem_achado_nao_e_malformado() -> None:
+    """Property do critério de aceite: presença de p2c>teto OU zip em JWE produz
+    >=1 achado, em vez de error/RC=2 — e um JWE limpo audita sem erro nenhum."""
+    header = {"alg": "ECDH-ES", "enc": "A256GCM"}
+    findings = run_all(decode(jwe_token(header)), NOW)
+    assert findings == []
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        {"alg": "PBES2-HS256+A128KW", "enc": "A128CBC-HS256", "p2c": 2_000_000},
+        {"alg": "RSA-OAEP", "enc": "A256GCM", "zip": "DEF"},
+    ],
+    ids=["p2c-acima-do-teto", "zip-presente"],
+)
+def test_jwe_p2c_alto_ou_zip_gera_ao_menos_um_achado(header: dict) -> None:
+    assert len(run_all(decode(jwe_token(header)), NOW)) >= 1
 
 
 # --------------------------------------------------------------------------- #

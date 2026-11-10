@@ -145,6 +145,10 @@ _MAX_NESTED_DEPTH = 512
 def _run_camada(token: DecodedToken, now: int) -> list[Finding]:
     """Bateria COMPLETA de checagens de UMA camada (sem descer no aninhamento — a descida e
     do laco em run_all). Extraida para rodar identica em cada nivel de um JWT aninhado."""
+    if token.is_jwe:
+        # JWE nao tem payload claro, assinatura JWS nem claims — a bateria JWS
+        # (alg/claims/payload/nesting) nao se aplica. Checagem dedicada abaixo.
+        return check_jwe_header(token)
     findings: list[Finding] = []
     findings += check_alg(token)
     findings += check_header(token)
@@ -519,6 +523,70 @@ def check_payload(token: DecodedToken) -> list[Finding]:
                     "payload-sensitive",
                     f"A claim {path!r} contém um CPF (dado pessoal — LGPD) no payload.",
                     evidence=f"{path}=<cpf>",
+                )
+            )
+    return out
+
+
+# PBES2 (RFC 7518 §4.8): 'p2c' e o contador de iteracao e e lido do header EM CLARO, ANTES de
+# qualquer tentativa de decifracao/autenticacao — ou seja, o ATACANTE o controla. Nao ha teto no
+# RFC; emissores reais usam a faixa de milhares (RFC 7518 recomenda minimo 1000). Um p2c muito
+# acima disso nao beneficia ninguem que tenha a senha certa — so quem quer forcar custo de CPU em
+# toda tentativa de decifracao antes da rejeicao (DoS). O teto fica generoso o bastante para nao
+# acusar um emissor real por engano, e baixo o bastante para pegar o caso patologico.
+_PBES2_P2C_TETO = 1_000_000
+_JWE_ALG_RSA1_5 = "RSA1_5"
+_JWE_ALG_DIR = "dir"
+
+
+def check_jwe_header(token: DecodedToken) -> list[Finding]:
+    """Checagens passivas do header protegido de um JWE (RFC 7516) — NUNCA descriptografa, NUNCA
+    toca rede. Ataca a CLASSE do item AUD0908-fn-jwe-5-segmentos-nao-auditado: um JWE de 5
+    segmentos parava de ser auditado (tratado como 3-segmentos malformado) e a superfície do
+    header em claro — p2c inflado, zip, alg:dir, alg:RSA1_5 — ficava cega."""
+    if not token.is_jwe:
+        return []
+    out: list[Finding] = []
+    header = token.header
+    p2c = header.get("p2c")
+    if isinstance(p2c, (int, float)) and not isinstance(p2c, bool) and p2c > _PBES2_P2C_TETO:
+        out.append(
+            make_finding(
+                "jwe-pbes2-p2c-alto",
+                f"'p2c' = {p2c}, acima do teto de {_PBES2_P2C_TETO}. Controlado pelo atacante no "
+                "header em claro, lido antes de qualquer verificação.",
+                evidence=f"p2c={p2c}",
+            )
+        )
+    zip_param = header.get("zip")
+    if isinstance(zip_param, str) and zip_param.strip().upper() == "DEF":
+        out.append(
+            make_finding(
+                "jwe-zip-compression",
+                "'zip: DEF' comprime o plaintext antes de cifrar — sem teto de tamanho na "
+                "descompressão, é vetor de bomba de descompressão.",
+                evidence=f"zip={zip_param!r}",
+            )
+        )
+    alg = header.get("alg")
+    if isinstance(alg, str):
+        alg_norm = alg.strip()
+        if alg_norm == _JWE_ALG_DIR:
+            out.append(
+                make_finding(
+                    "jwe-alg-dir",
+                    "'alg: dir' usa a chave de gerenciamento diretamente como chave de conteúdo "
+                    "— sem key wrapping.",
+                    evidence=f"alg={alg_norm!r}",
+                )
+            )
+        elif alg_norm == _JWE_ALG_RSA1_5:
+            out.append(
+                make_finding(
+                    "jwe-alg-rsa1-5",
+                    "'alg: RSA1_5' (RSAES-PKCS1-v1_5) é vulnerável a ataque de oráculo de "
+                    "padding (Bleichenbacher).",
+                    evidence=f"alg={alg_norm!r}",
                 )
             )
     return out

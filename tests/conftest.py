@@ -27,6 +27,20 @@ def raw_token(header: dict, payload: dict, signature: bytes = b"") -> str:
     return f"{h}.{p}.{b64url_encode(signature)}"
 
 
+def jwe_token(header: dict) -> str:
+    """Monta um JWE compacto arbitrário (RFC 7516 §7.1): 5 segmentos. Chave
+    encriptada/IV/texto cifrado/tag são dummies — o Chaveiro só audita o
+    header protegido (seg0) em claro, nunca decifra."""
+    h = b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    dummies = (
+        b64url_encode(b"k"),
+        b64url_encode(b"iv"),
+        b64url_encode(b"ct"),
+        b64url_encode(b"tag"),
+    )
+    return f"{h}.{'.'.join(dummies)}"
+
+
 def hs_token(
     payload: dict, secret: str = "secret", alg: str = "HS256", **header_extra: object
 ) -> str:
