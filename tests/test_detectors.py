@@ -41,7 +41,7 @@ _CASOS_POSITIVOS: list[tuple[str, dict, dict]] = [
     ("claim-no-iat", {"alg": "HS256"}, {"exp": NOW + 60, "aud": "x", "iss": "y"}),
     ("claim-no-aud", {"alg": "HS256"}, {"exp": NOW + 60, "iat": NOW, "iss": "y"}),
     ("claim-no-iss", {"alg": "HS256"}, {"exp": NOW + 60, "iat": NOW, "aud": "x"}),
-    ("claim-malformed-time", {"alg": "HS256"}, {"exp": "1", "iat": NOW}),
+    ("claim-malformed-time", {"alg": "HS256"}, {"exp": "nao-numerico", "iat": NOW}),
     ("claim-nbf-future", {"alg": "HS256"}, {"nbf": NOW + 3600, "exp": NOW + 7200}),
     ("payload-nested-jwt", {"alg": "HS256"}, {"assertion": _INNER_JWT}),
     ("payload-sensitive", {"alg": "HS256"}, {"password": "hunter2"}),
@@ -116,6 +116,9 @@ _CASOS_NEGATIVOS: list[tuple[str, dict, dict]] = [
     ("claim-no-exp", {"alg": "HS256"}, {"exp": NOW + 60}),
     # exp/iat numéricos não são claim temporal malformada.
     ("claim-malformed-time", {"alg": "HS256"}, {"exp": NOW + 60, "iat": NOW}),
+    # exp/iat numéricos-COMO-STRING (coercíveis) também não são malformados — é o
+    # mesmo NumericDate, só em outra representação (AUD0908).
+    ("claim-malformed-time", {"alg": "HS256"}, {"exp": str(NOW + 60), "iat": str(NOW)}),
     # alg conhecido não é alg desconhecido.
     ("alg-unknown", {"alg": "RS256"}, {"sub": "a"}),
     # kid opaco e rotacionado não é injeção.
