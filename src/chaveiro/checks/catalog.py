@@ -219,6 +219,17 @@ CATALOG: dict[str, CheckMeta] = {
             None,
         ),
         CheckMeta(
+            "header-b64-false",
+            "'b64: false' — payload não codificado (RFC 7797)",
+            Severity.MEDIUM,
+            "RFC 7797 exige 'b64' em 'crit' quando 'b64:false' é usado, justamente para que um "
+            "verificador que não suporte a opção rejeite o token em vez de reinterpretar os bytes "
+            "assinados. Confirme que todo verificador no caminho entende RFC 7797 antes de aceitar "
+            "esses tokens; se não precisar da opção, rejeite 'b64:false' explicitamente.",
+            "A07:2025 Authentication Failures",
+            "CWE-345",
+        ),
+        CheckMeta(
             "header-zip-jws",
             "'zip' (compressão) num JWS de 3 segmentos",
             Severity.HIGH,

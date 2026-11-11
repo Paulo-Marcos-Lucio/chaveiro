@@ -100,13 +100,21 @@ def decode(token: str) -> DecodedToken:
     **JWT aninhado** (§5.2), cujo payload é outro JWS compacto. No aninhado,
     ``payload`` fica vazio — a casca não tem claims próprias — e ``nested``
     guarda o token interno, que precisa ser auditado à parte.
+
+    Também cobre a opção de payload não codificado do RFC 7797 (``b64: false``):
+    nesse caso o segmento do meio é o conteúdo cru, não base64url, e é tratado
+    como tal em vez de ser descartado como malformado.
     """
     token = token.strip()
     # 'Bearer ' colado na frente (copiado de um header Authorization) e quebras de linha no
     # meio (token colado de e-mail/PDF) fazem o decode estrito recusar um token real. Um
     # verificador tolerante os aceitaria, entao o auditor tambem precisa ver o token por
     # baixo do ruido (FN H1/H2). O alfabeto base64url nao tem espaco nem quebra, entao
-    # remover espacos em branco nunca corrompe um token legitimo.
+    # remover espacos em branco nunca corrompe um token legitimo CODIFICADO. Excecao
+    # conhecida e fora do escopo deste modulo: RFC 7797 ('b64: false', ramo abaixo) usa o
+    # payload CRU, que pode conter espaco legitimo — a normalizacao a seguir nao preserva
+    # esse espaco, entao o `signing_input` de um 'b64:false' com espaco real nao reproduz
+    # os bytes originais. Nao afeta a auditoria (header/claims continuam lidos).
     if token[:7].lower() == "bearer ":
         token = token[7:].strip()
     token = re.sub(r"\s+", "", token)
@@ -115,9 +123,19 @@ def decode(token: str) -> DecodedToken:
         raise JWTError(f"esperados 3 segmentos separados por ponto, encontrei {len(parts)}")
     header_b64, payload_b64, sig_b64 = parts
     header = _decode_json(header_b64, "header")
-    payload, nested = _decode_payload(payload_b64)
+    if header.get("b64") is False:
+        # RFC 7797 §3 (opcao de payload nao codificado): o segmento do meio e o payload
+        # CRU, nao base64url. Decodifica-lo como base64url so descartaria o token como
+        # malformado por usar uma opcao de serializacao valida — o FN que este ramo fecha
+        # (header/alg/kid/crit precisam ser auditados mesmo quando o payload nao e
+        # base64url-de-JSON). O signing input tambem muda: e o payload literal, nao o seu
+        # base64url-decode (RFC 7797 §5).
+        payload, nested = _decode_unencoded_payload(payload_b64)
+        signing_input = f"{header_b64}.".encode("ascii") + payload_b64.encode("utf-8")
+    else:
+        payload, nested = _decode_payload(payload_b64)
+        signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
     signature = b64url_decode(sig_b64)
-    signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
     return DecodedToken(
         raw=token,
         header=header,
@@ -219,6 +237,26 @@ def _decode_payload(segment: str) -> tuple[dict[str, Any], str | None]:
     if not isinstance(data, dict):
         raise JWTError("payload deve ser um objeto JSON (ou um JWS compacto, se aninhado)")
     return data, None
+
+
+def _decode_unencoded_payload(segment: str) -> tuple[dict[str, Any], str | None]:
+    """Payload de um JWS com 'b64:false' (RFC 7797): o segmento JA e o conteudo, sem
+    base64url por cima. A opcao existe sobretudo para payload NAO-JSON (binario, XML,
+    CSV assinado) — quando da pra ler como objeto JSON expomos as claims para as outras
+    checagens (exp/iat/aud…); quando nao da, o payload fica vazio, e isso NAO e
+    malformacao: e a opcao funcionando como o RFC descreve, nao um token quebrado.
+    Nunca ha aninhamento aqui — JWT aninhado (RFC 7519 §5.2) exige o payload da casca EM
+    base64url, que e exatamente o que 'b64:false' desliga.
+    """
+    try:
+        raw = segment.encode("utf-8")
+    except UnicodeEncodeError:
+        return {}, None
+    try:
+        data = parse_json_limited(raw, "payload")
+    except JWTError:
+        return {}, None
+    return (data, None) if isinstance(data, dict) else ({}, None)
 
 
 def _as_nested_jws(raw: bytes) -> str | None:

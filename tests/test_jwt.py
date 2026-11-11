@@ -98,6 +98,37 @@ def test_decode_real_nested_jwt() -> None:
     assert decoded.payload == {}  # a casca não tem claims próprias
 
 
+def test_decode_b64_false_unencoded_payload_is_audited() -> None:
+    # RFC 7797 §3: com 'b64:false' o payload e o conteudo CRU, nao base64url. Antes
+    # desta checagem, `b64url_decode`/`json.loads` no payload levantava JWTError e o
+    # token inteiro era descartado como malformado -- nem o cabecalho era auditado.
+    header_b64 = b64url_encode(b'{"alg":"HS256","b64":false,"crit":["b64"]}')
+    payload_cru = "nao e base64url nem JSON, e RFC 7797 (b64:false)"
+    sig_b64 = b64url_encode(b"sig")
+    decoded = decode(f"{header_b64}.{payload_cru}.{sig_b64}")
+    assert decoded.header["b64"] is False
+    assert decoded.payload == {}  # payload cru nao-JSON: sem claims, mas header auditado
+    assert decoded.signature == b"sig"
+
+
+def test_decode_b64_false_with_json_payload_exposes_claims() -> None:
+    # A opcao nao exige payload nao-JSON; quando ele FOR JSON, as claims continuam
+    # visiveis para check_claims (exp/iat/aud...).
+    header_b64 = b64url_encode(b'{"alg":"HS256","b64":false}')
+    decoded = decode(f'{header_b64}.{{"sub":"alice"}}.' + b64url_encode(b"sig"))
+    assert decoded.payload == {"sub": "alice"}
+
+
+def test_decode_b64_false_signing_input_uses_literal_payload() -> None:
+    # Signing input do RFC 7797 (b64:false) e o payload LITERAL, nao o seu
+    # base64url-decode -- o contrario do caso comum.
+    header_b64 = b64url_encode(b'{"alg":"HS256","b64":false}')
+    payload_cru = "abc"
+    sig_b64 = b64url_encode(b"sig")
+    decoded = decode(f"{header_b64}.{payload_cru}.{sig_b64}")
+    assert decoded.signing_input == f"{header_b64}.{payload_cru}".encode("ascii")
+
+
 def test_verify_asymmetric_ps256_roundtrip(rsa_keys: tuple[bytes, bytes]) -> None:
     private_pem, public_pem = rsa_keys
     token = sign_ps256({"sub": "x"}, private_pem)
