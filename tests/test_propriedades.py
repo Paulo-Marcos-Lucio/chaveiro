@@ -12,11 +12,16 @@ afirmam as propriedades que não podem falhar:
 
 from __future__ import annotations
 
+import json
+
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from chaveiro.checks.detectors import has_cpf
+from chaveiro.checks.detectors import has_cpf, run_all
+from chaveiro.core.jwt import b64url_encode, decode
 from chaveiro.report.redaction import REDIGIDO, redact_claims
+
+NOW = 1_800_000_000
 
 _CHAVES_INOCENTES = st.sampled_from(["nota", "obs", "custom", "documento", "campo_x", "dados"])
 _ESTRUTURAIS = st.sampled_from(["alg", "exp", "iat", "nbf", "iss", "aud", "typ", "kid", "jti"])
@@ -64,3 +69,40 @@ def test_chave_estrutural_nunca_e_redigida(chave: str, valor: int) -> None:
     """INVARIANTE 3: metadados do token (exp/iat/aud/...) não podem ser destruídos pela redação."""
     saida = redact_claims({chave: valor})
     assert saida[chave] == valor, f"chave estrutural {chave!r} foi redigida indevidamente"
+
+
+# --------------------------------------------------------------------------- #
+# INVARIANTE 4 (AUD0908-fn-rfc7797-b64false-nao-modelado): um cabeçalho com
+# 'b64:false' (RFC 7797, payload não codificado) nunca pode ser descartado como
+# token malformado só porque o payload não é base64url-de-JSON — e precisa
+# sempre gerar o achado DEDICADO de confusão b64/crit, não o header-crit
+# genérico (que não comunica o risco real de RFC 7797 §6). Vale para qualquer
+# conteúdo de payload cru e qualquer valor de 'crit', inclusive o caso mais
+# perigoso: 'crit' sem 'b64'.
+# --------------------------------------------------------------------------- #
+
+_CRIT_VARIANTES = st.one_of(
+    st.none(),
+    st.just(["b64"]),
+    st.just(["exp", "b64"]),
+    st.just(["exp"]),  # falta 'b64' no crit — o caso mais perigoso do RFC 7797 §6
+)
+
+
+@settings(max_examples=150)
+@given(payload_cru=st.text(max_size=40).filter(lambda s: "." not in s), crit=_CRIT_VARIANTES)
+def test_b64_false_e_sempre_auditado_com_achado_dedicado(
+    payload_cru: str, crit: list[str] | None
+) -> None:
+    header: dict[str, object] = {"alg": "HS256", "b64": False}
+    if crit is not None:
+        header["crit"] = crit
+    header_b64 = b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    sig_b64 = b64url_encode(b"sig")
+    token = f"{header_b64}.{payload_cru}.{sig_b64}"
+
+    decoded = decode(token)  # nao pode levantar JWTError, qualquer que seja o payload cru
+    ids = {f.check_id for f in run_all(decoded, NOW)}
+
+    assert "header-b64-false" in ids, f"b64:false nao gerou achado dedicado (crit={crit!r})"
+    assert "header-crit" not in ids, "header-crit generico nao devia sobreviver ao b64:false"

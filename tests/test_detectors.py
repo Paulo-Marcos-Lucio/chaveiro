@@ -32,6 +32,7 @@ _CASOS_POSITIVOS: list[tuple[str, dict, dict]] = [
     ("header-jwk", {"alg": "HS256", "jwk": {"kty": "oct"}}, {"sub": "a"}),
     ("header-x5c", {"alg": "HS256", "x5c": ["MIIB..."]}, {"sub": "a"}),
     ("header-crit", {"alg": "HS256", "crit": ["exp"]}, {"sub": "a"}),
+    ("header-b64-false", {"alg": "HS256", "b64": False, "crit": ["b64"]}, {"sub": "a"}),
     ("header-zip-jws", {"alg": "HS256", "zip": "DEF"}, {"sub": "a"}),
     ("header-kid-injection", {"alg": "HS256", "kid": "../../etc/passwd"}, {"sub": "a"}),
     ("header-cty-nested", {"alg": "HS256", "cty": "JWT"}, {"sub": "a"}),
@@ -89,6 +90,27 @@ def test_cada_checagem_dispara(check_id: str, header: dict, payload: dict) -> No
     construtor = _CONSTRUTORES_ESPECIAIS.get(check_id)
     token = construtor() if construtor else raw_token(header, payload)
     assert check_id in _ids(token)
+
+
+def test_b64_false_substitui_header_crit_generico() -> None:
+    # "em vez do generico header-crit(info)": a confusao b64/crit e mais especifica e
+    # mais grave do que "ha extensoes criticas" -- substitui, nao soma.
+    ids = _ids(raw_token({"alg": "HS256", "b64": False, "crit": ["b64"]}, {"sub": "a"}))
+    assert "header-b64-false" in ids
+    assert "header-crit" not in ids
+
+
+def test_b64_false_dispara_mesmo_sem_b64_no_crit() -> None:
+    # O caso mais perigoso do RFC 7797 §6: 'b64:false' sem 'b64' em 'crit' -- um
+    # verificador que nao suporte a opcao nem rejeite por 'crit' desconhecido pode
+    # reinterpretar o payload cru como se fosse base64url comum.
+    assert "header-b64-false" in _ids(raw_token({"alg": "HS256", "b64": False}, {"sub": "a"}))
+
+
+def test_header_crit_continua_disparando_sem_b64_false() -> None:
+    ids = _ids(raw_token({"alg": "HS256", "crit": ["exp"]}, {"sub": "a"}))
+    assert "header-crit" in ids
+    assert "header-b64-false" not in ids
 
 
 def test_toda_checagem_do_catalogo_tem_caso_positivo() -> None:

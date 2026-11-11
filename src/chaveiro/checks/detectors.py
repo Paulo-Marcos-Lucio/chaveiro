@@ -333,6 +333,11 @@ def check_alg(token: DecodedToken) -> list[Finding]:
     return out
 
 
+def _crit_inclui_b64(header: dict[str, Any]) -> bool:
+    crit = header.get("crit")
+    return isinstance(crit, list) and "b64" in crit
+
+
 def check_header(token: DecodedToken) -> list[Finding]:
     out: list[Finding] = []
     header = token.header
@@ -349,7 +354,22 @@ def check_header(token: DecodedToken) -> list[Finding]:
         out.append(make_finding("header-jwk", "Chave pública embutida no próprio token ('jwk')."))
     if "x5c" in header:
         out.append(make_finding("header-x5c", "Cadeia de certificados embutida ('x5c')."))
-    if "crit" in header:
+    if header.get("b64") is False:
+        # RFC 7797 §3/§6: 'b64:false' muda o que foi assinado (payload cru, não
+        # base64url) e o RFC exige 'b64' em 'crit' para que um verificador que não
+        # entenda a opção REJEITE o token em vez de interpretar os bytes errados como
+        # se fossem base64url comum. Isso é uma superfície de confusão própria — mais
+        # específica e mais grave do que "há extensões críticas" — então substitui o
+        # header-crit genérico em vez de somar a ele.
+        out.append(
+            make_finding(
+                "header-b64-false",
+                "O cabeçalho declara 'b64: false' (RFC 7797, payload não codificado). "
+                f"'crit' {'inclui' if _crit_inclui_b64(header) else 'NÃO inclui'} 'b64'.",
+                evidence=f"b64=False, crit={header.get('crit')!r}",
+            )
+        )
+    elif "crit" in header:
         out.append(make_finding("header-crit", f"Extensões críticas: {header['crit']!r}."))
     if "zip" in header:
         # O token que chega aqui é sempre um JWS compacto de 3 segmentos (o parser rejeita
